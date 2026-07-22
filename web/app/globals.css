@@ -1,0 +1,337 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ==========================================================================
+   Obsidian Spatial — Technical Minimalism
+   Pure-black OLED foundation, monochromatic palette, zero-radius geometry.
+   ========================================================================== */
+
+:root {
+  /* Surface tier (Luminance Tiering) */
+  --color-base: #000000; /* Level 0 — pure black */
+  --color-surface: #0a0a0a; /* Level 1 — panels */
+  --color-surface-2: #121212; /* Level 2 — popovers/modals */
+  --color-elevated: #1a1a1a;
+
+  /* Obsidian Spatial theme tokens (mirror Tailwind config) */
+  --color-background: #121414;
+  --color-on-surface: #e3e2e2;
+  --color-on-surface-variant: #c4c7c8;
+  --color-outline: #8e9192;
+  --color-outline-variant: #444748;
+  --color-primary: #ffffff;
+  --color-on-primary: #2f3131;
+  --color-tertiary-fixed: #6bfe9c;
+  --color-tertiary-fixed-dim: #4ae183;
+  --color-error: #ffb4ab;
+
+  /* Functional accent (used as 1px strokes / small indicators) */
+  --color-success: #6bfe9c;
+  --color-warning: #fbbf24;
+  --color-danger: #ffb4ab;
+
+  /* Grid lines: white 7% major, 3% minor */
+  --color-grid-major: rgba(255, 255, 255, 0.07);
+  --color-grid-minor: rgba(255, 255, 255, 0.03);
+
+  /* Line work — 1px borders */
+  --color-line: #1a1a1a;
+  --color-line-strong: #333333;
+  --color-line-primary: #ffffff;
+
+  /* Typography fallbacks (real fonts injected via next/font CSS vars) */
+  --font-geist-sans: 'Geist', 'Inter', system-ui, sans-serif;
+  --font-geist: var(--font-geist-sans); /* alias kept for older refs */
+  --font-jetbrains: 'JetBrains Mono', 'Consolas', monospace;
+
+  /* Spatial grid */
+  --grid-major: 32px;
+  --grid-minor: 8px;
+}
+
+* {
+  border-color: var(--color-outline-variant);
+}
+
+html {
+  color-scheme: dark;
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--color-base);
+  color: var(--color-on-surface);
+  font-family: var(--font-geist-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ==========================================================================
+   Spatial Grid — persistent technical grid background
+   Aligns to 32px major / 8px minor scale; pure-black OLED foundation.
+   ========================================================================== */
+.spatial-grid {
+  position: relative;
+  background-color: var(--color-base);
+  background-image:
+    /* Minor subdivisions (8px, white 3%) */
+    linear-gradient(to right, var(--color-grid-minor) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--color-grid-minor) 1px, transparent 1px),
+    /* Major grid (32px, white 7%) */
+    linear-gradient(to right, var(--color-grid-major) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--color-grid-major) 1px, transparent 1px);
+  background-size:
+    var(--grid-minor) var(--grid-minor),
+    var(--grid-minor) var(--grid-minor),
+    var(--grid-major) var(--grid-major),
+    var(--grid-major) var(--grid-major);
+  background-position:
+    0 0, 0 0, 0 0, 0 0;
+}
+
+/* Edge fade so the grid feels like deep space rather than a tile */
+.spatial-grid::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, transparent 0%, var(--color-base) 85%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.spatial-grid > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* Legacy alias kept for any older references */
+.grid-bg {
+  position: relative;
+  background-color: var(--color-base);
+  background-image:
+    linear-gradient(to right, var(--color-grid-major) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--color-grid-major) 1px, transparent 1px);
+  background-size: var(--grid-major) var(--grid-major);
+}
+.grid-bg::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, transparent 0%, var(--color-base) 80%);
+  pointer-events: none;
+  z-index: 0;
+}
+.grid-bg > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* ==========================================================================
+   Scrollbar — minimal, monochromatic
+   ========================================================================== */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-outline-variant);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-outline);
+}
+
+::selection {
+  background: rgba(255, 255, 255, 0.18);
+  color: var(--color-primary);
+}
+
+/* ==========================================================================
+   Streaming cursor — terminal-style blinking block
+   ========================================================================== */
+.cursor-blink::after {
+  content: "▋";
+  margin-left: 2px;
+  color: var(--color-primary);
+  animation: blink 1s step-end infinite;
+}
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+/* ==========================================================================
+   Article content — long-form reading zone
+   Uses Geist for clinical precision; zero radius; 1px line work.
+   ========================================================================== */
+.article-content {
+  font-family: var(--font-geist-sans);
+  font-size: 16px;
+  line-height: 1.7;
+  color: var(--color-on-surface);
+}
+.article-content h1 {
+  font-size: 32px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  margin: 2.5em 0 0.8em;
+}
+.article-content h2 {
+  font-size: 24px;
+  font-weight: 500;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+  margin: 2em 0 0.7em;
+  padding-bottom: 0.4em;
+  border-bottom: 1px solid var(--color-outline-variant);
+}
+.article-content h3 {
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  margin: 1.6em 0 0.6em;
+}
+.article-content p {
+  margin: 1em 0;
+}
+.article-content a {
+  color: var(--color-primary);
+  text-decoration: none;
+  border-bottom: 1px solid var(--color-outline-variant);
+  transition: border-color 0.2s;
+}
+.article-content a:hover {
+  border-bottom-color: var(--color-primary);
+}
+.article-content code {
+  font-family: var(--font-jetbrains);
+  font-size: 0.86em;
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  padding: 0.12em 0.4em;
+}
+.article-content pre {
+  background: var(--color-surface);
+  border: 1px solid var(--color-line-strong);
+  padding: 16px;
+  overflow-x: auto;
+  margin: 1.2em 0;
+}
+.article-content pre code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font-size: 13px;
+}
+.article-content blockquote {
+  background: transparent;
+  border-left: 2px solid var(--color-primary);
+  padding: 4px 0 4px 16px;
+  margin: 1.2em 0;
+  color: var(--color-on-surface-variant);
+  font-style: normal;
+}
+.article-content img {
+  border: 1px solid var(--color-line);
+  margin: 1.2em auto;
+  max-width: 100%;
+}
+.article-content ul,
+.article-content ol {
+  padding-left: 1.5em;
+  margin: 1em 0;
+}
+.article-content ul li {
+  list-style: none;
+  position: relative;
+  padding-left: 1em;
+}
+.article-content ul li::before {
+  content: "—";
+  position: absolute;
+  left: 0;
+  color: var(--color-outline-variant);
+}
+.article-content ol li {
+  list-style: decimal;
+}
+.article-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.2em 0;
+  font-family: var(--font-jetbrains);
+  font-size: 13px;
+}
+.article-content th,
+.article-content td {
+  border: 1px solid var(--color-line-strong);
+  padding: 8px 12px;
+  text-align: left;
+}
+.article-content th {
+  background: var(--color-surface);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 500;
+  font-size: 11px;
+  color: var(--color-on-surface-variant);
+}
+
+@media (max-width: 767px) {
+  .article-content {
+    font-size: 15px;
+  }
+  .article-content h1 { font-size: 26px; }
+  .article-content h2 { font-size: 21px; }
+}
+
+/* ==========================================================================
+   Hover card — border-led interaction (no drop shadows in pure-black)
+   ========================================================================== */
+.hover-card {
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.hover-card:hover {
+  border-color: var(--color-primary);
+  background-color: var(--color-surface);
+}
+
+/* ==========================================================================
+   Character card — scanline hover effect (from 角色选择.html)
+   ========================================================================== */
+.character-card {
+  position: relative;
+}
+.character-card .scanline {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.12);
+  pointer-events: none;
+  animation: scan 4s linear infinite;
+  z-index: 5;
+}
+@keyframes scan {
+  0% { top: 0%; opacity: 0.6; }
+  50% { opacity: 1; }
+  100% { top: 100%; opacity: 0.6; }
+}
+
+/* ==========================================================================
+   Reduced motion
+   ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
