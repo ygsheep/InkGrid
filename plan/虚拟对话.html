@@ -1,0 +1,238 @@
+<!DOCTYPE html><html class="dark" lang="zh-CN"><head><meta charset="utf-8"><meta content="width=device-width, initial-scale=1.0" name="viewport"><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&amp;family=Geist:wght@400;500;600&amp;display=swap" rel="stylesheet"><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=block" rel="stylesheet"><script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script><script id="tailwind-config">try{
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "tertiary": "#ffffff",
+                        "primary": "#ffffff",
+                        "on-tertiary": "#003919",
+                        "on-secondary": "#313030",
+                        "surface-dim": "#121414",
+                        "surface-container-lowest": "#0d0e0f",
+                        "on-secondary-fixed-variant": "#474746",
+                        "background": "#000000",
+                        "tertiary-container": "#6bfe9c",
+                        "surface-tint": "#c6c6c7",
+                        "on-surface": "#e3e2e2",
+                        "secondary": "#c8c6c5",
+                        "on-surface-variant": "#c4c7c8",
+                        "tertiary-fixed": "#6bfe9c",
+                        "on-background": "#e3e2e2",
+                        "primary-fixed-dim": "#c6c6c7",
+                        "outline-variant": "#1A1A1A",
+                        "on-tertiary-container": "#00743a",
+                        "tertiary-fixed-dim": "#4ae183",
+                        "on-secondary-fixed": "#1c1b1b",
+                        "on-primary-fixed": "#1a1c1c",
+                        "on-error-container": "#ffdad6",
+                        "inverse-surface": "#e3e2e2",
+                        "inverse-primary": "#5d5f5f",
+                        "primary-container": "#e2e2e2",
+                        "on-secondary-container": "#b7b5b4",
+                        "surface-container-low": "#1b1c1c",
+                        "surface-container": "#1f2020",
+                        "surface": "#121414",
+                        "primary-fixed": "#e2e2e2",
+                        "surface-container-highest": "#343535",
+                        "secondary-fixed-dim": "#c8c6c5",
+                        "secondary-fixed": "#e5e2e1",
+                        "surface-bright": "#383939",
+                        "on-error": "#690005",
+                        "error": "#ffb4ab",
+                        "surface-container-high": "#292a2a",
+                        "on-tertiary-fixed-variant": "#005228",
+                        "error-container": "#93000a",
+                        "on-primary": "#2f3131",
+                        "surface-variant": "#343535",
+                        "outline": "#333333",
+                        "on-primary-container": "#636565",
+                        "on-primary-fixed-variant": "#454747",
+                        "inverse-on-surface": "#303031",
+                        "secondary-container": "#474746",
+                        "on-tertiary-fixed": "#00210c"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0px",
+                        "lg": "0px",
+                        "xl": "0px",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "gutter": "24px",
+                        "margin-mobile": "16px",
+                        "grid-major": "32px",
+                        "base": "4px",
+                        "margin-desktop": "48px",
+                        "grid-minor": "8px"
+                    },
+                    "fontFamily": {
+                        "label-mono": ["JetBrains Mono"],
+                        "body-md": ["Geist"],
+                        "headline-lg-mobile": ["Geist"],
+                        "body-sm": ["Geist"],
+                        "headline-md": ["Geist"],
+                        "headline-lg": ["Geist"]
+                    },
+                    "fontSize": {
+                        "label-mono": ["12px", {"lineHeight": "1", "letterSpacing": "0.05em", "fontWeight": "500"}],
+                        "body-md": ["16px", {"lineHeight": "1.6", "letterSpacing": "0", "fontWeight": "400"}],
+                        "headline-lg-mobile": ["24px", {"lineHeight": "1.2", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                        "body-sm": ["14px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                        "headline-md": ["20px", {"lineHeight": "1.4", "letterSpacing": "-0.01em", "fontWeight": "500"}],
+                        "headline-lg": ["48px", {"lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "600"}]
+                    }
+                },
+            },
+        }
+    }catch(_e){}</script></head><body class="bg-background selection:bg-primary selection:text-background">
+<!-- Background Grid -->
+<div class="fixed inset-0 technical-grid pointer-events-none opacity-20 z-0"></div>
+<!-- Layout Container -->
+<div class="relative flex flex-col h-screen max-w-md mx-auto z-10 border-x border-outline-variant">
+<!-- Top App Bar -->
+<header class="flex items-center justify-between px-margin-mobile py-grid-minor bg-background border-b border-outline-variant sticky top-0 z-50">
+<div class="flex items-center gap-base">
+<button class="p-2 -ml-2 active:opacity-50 transition-opacity">
+<span class="material-symbols-outlined text-primary">arrow_back</span>
+</button>
+<div class="flex flex-col">
+<span class="font-headline-md text-headline-md leading-none tracking-tighter">AETHER_OS</span>
+<span class="font-label-mono text-[10px] text-tertiary-fixed-dim uppercase">活跃会话：节点_V01</span>
+</div>
+</div>
+<div class="flex items-center gap-grid-minor">
+<button class="w-10 h-10 border border-outline flex items-center justify-center hover:bg-surface-container-low transition-colors">
+<span class="material-symbols-outlined text-primary">call</span>
+</button>
+<div class="w-8 h-8 bg-primary flex items-center justify-center">
+<span class="material-symbols-outlined text-background text-sm">account_circle</span>
+</div>
+</div>
+</header>
+<!-- Chat Area -->
+<main class="flex-1 overflow-y-auto px-margin-mobile py-grid-major space-y-grid-major hide-scrollbar" id="chat-container">
+<!-- Timestamp Divider -->
+<div class="flex justify-center">
+<span class="font-label-mono text-label-mono text-on-surface-variant px-2 bg-background border border-outline-variant">系统时间: 14:22:01</span>
+</div>
+<!-- Agent Bubble -->
+<div class="flex flex-col items-start gap-grid-minor max-w-[85%]">
+<div class="flex items-center gap-base mb-1">
+<span class="font-label-mono text-[10px] text-tertiary-fixed-dim">节点_V01</span>
+<div class="h-[1px] w-4 bg-tertiary-fixed-dim"></div>
+</div>
+<div class="bg-surface-container-lowest border border-outline-variant p-grid-minor inner-glow">
+<p class="font-body-sm text-body-sm text-on-surface leading-relaxed">
+                        界面已初始化。我已处理来自神经核心的最新遥测数据。空间网格现已针对 1:1 交互进行优化。我们应该如何进行数据提取？
+                    </p>
+</div>
+<span class="font-label-mono text-[9px] text-outline self-start">已确认 // 14:22:05</span>
+</div>
+<!-- User Bubble -->
+<div class="flex flex-col items-end gap-grid-minor ml-auto max-w-[85%]">
+<div class="flex items-center gap-base mb-1">
+<div class="h-[1px] w-4 bg-primary"></div>
+<span class="font-label-mono text-[10px] text-primary">操作员_00</span>
+</div>
+<div class="bg-primary text-background p-grid-minor">
+<p class="font-body-sm text-body-sm font-medium leading-relaxed">
+                        在继续之前，请验证 2 级面板分层的完整性。我在移动视口上看到了亮度值的细微偏差。
+                    </p>
+</div>
+<span class="font-label-mono text-[9px] text-outline self-end">已发送 // 14:23:12</span>
+</div>
+<!-- System Update Message -->
+<div class="border-y border-outline-variant py-grid-minor flex items-center justify-between">
+<div class="flex items-center gap-grid-minor">
+<span class="material-symbols-outlined text-primary text-sm">settings_input_component</span>
+<span class="font-label-mono text-[10px] text-on-surface-variant LUMINANCE_SYNC_IN_PROGRESS">亮度同步进行中</span>
+</div>
+<span class="font-label-mono text-[10px] text-primary">72%</span>
+</div>
+<!-- Agent Bubble with Data Visualization -->
+<div class="flex flex-col items-start gap-grid-minor max-w-[85%]">
+<div class="flex items-center gap-base mb-1">
+<span class="font-label-mono text-[10px] text-tertiary-fixed-dim">节点_V01</span>
+<div class="h-[1px] w-4 bg-tertiary-fixed-dim"></div>
+</div>
+<div class="bg-surface-container-lowest border border-outline-variant p-grid-minor inner-glow space-y-grid-minor">
+<p class="font-body-sm text-body-sm text-on-surface leading-relaxed">
+                        调整着色器中。正在渲染下方网格结构的视觉确认。
+                    </p>
+<div class="h-32 border border-outline-variant relative overflow-hidden bg-black">
+<div class="absolute inset-0 flex items-center justify-center">
+<span class="font-label-mono text-[10px] bg-black/80 px-2 py-1 border border-primary text-primary">亮度验证图</span>
+</div>
+</div>
+</div>
+<span class="font-label-mono text-[9px] text-outline self-start">已确认 // 14:24:45</span>
+</div>
+<!-- User Bubble -->
+<div class="flex flex-col items-end gap-grid-minor ml-auto max-w-[85%]">
+<div class="flex items-center gap-base mb-1">
+<div class="h-[1px] w-4 bg-primary"></div>
+<span class="font-label-mono text-[10px] text-primary">操作员_00</span>
+</div>
+<div class="bg-primary text-background p-grid-minor">
+<p class="font-body-sm text-body-sm font-medium leading-relaxed">
+                        已确认。空间深度现已在可接受参数内。开启下一阶段的语音对话。
+                    </p>
+</div>
+<span class="font-label-mono text-[9px] text-outline self-end">已发送 // 14:26:01</span>
+</div>
+</main>
+<!-- Bottom Input Bar -->
+<footer class="bg-background border-t border-outline-variant p-margin-mobile pb-8 relative z-50">
+<div class="flex flex-col gap-grid-minor">
+<div class="flex items-center justify-between mb-1">
+<span class="font-label-mono text-[10px] text-outline uppercase">输入方式：终端_V4</span>
+<span class="font-label-mono text-[10px] text-primary">延迟: 12ms</span>
+</div>
+<div class="flex items-end gap-grid-minor">
+<button class="w-12 h-12 border border-outline flex items-center justify-center hover:bg-surface-container-low transition-colors group">
+<span class="material-symbols-outlined text-outline group-hover:text-primary">mic</span>
+</button>
+<div class="flex-1 border border-outline flex items-center px-4 bg-black group focus-within:border-primary transition-colors h-12">
+<textarea class="flex-1 bg-transparent border-none focus:ring-0 py-3 font-label-mono text-label-mono placeholder:text-outline text-primary resize-none hide-scrollbar" id="chat-input" placeholder="发送消息..." rows="1"></textarea>
+</div>
+<button class="w-12 h-12 bg-primary flex items-center justify-center active:opacity-70 transition-opacity">
+<span class="material-symbols-outlined text-background">send</span>
+</button>
+</div>
+</div>
+<!-- Quick Actions -->
+<div class="flex gap-grid-minor mt-grid-minor overflow-x-auto hide-scrollbar">
+<button class="px-3 py-1.5 border border-outline-variant font-label-mono text-[10px] text-on-surface-variant whitespace-nowrap hover:border-primary hover:text-primary transition-all">/状态报告</button>
+<button class="px-3 py-1.5 border border-outline-variant font-label-mono text-[10px] text-on-surface-variant whitespace-nowrap hover:border-primary hover:text-primary transition-all">/节点重置</button>
+<button class="px-3 py-1.5 border border-outline-variant font-label-mono text-[10px] text-on-surface-variant whitespace-nowrap hover:border-primary hover:text-primary transition-all">/日志导出</button>
+<button class="px-3 py-1.5 border border-outline-variant font-label-mono text-[10px] text-on-surface-variant whitespace-nowrap hover:border-primary hover:text-primary transition-all">/安全退出</button>
+</div>
+</footer>
+</div>
+<script>
+        // Micro-interaction for input auto-resize
+        const input = document.getElementById('chat-input');
+        input.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = (this.scrollHeight) + 'px';
+            if (this.scrollHeight > 120) {
+                this.style.overflowY = 'auto';
+            } else {
+                this.style.overflowY = 'hidden';
+            }
+        });
+
+        // Scroll to bottom on load
+        const chatContainer = document.getElementById('chat-container');
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+
+        // Subtle animation for system status
+        setInterval(() => {
+            const statusLine = document.querySelector('.LUMINANCE_SYNC_IN_PROGRESS');
+            if (statusLine) {
+                statusLine.style.opacity = statusLine.style.opacity === '0.5' ? '1' : '0.5';
+            }
+        }, 1000);
+    </script>
+</body></html>

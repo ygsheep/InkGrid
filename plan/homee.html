@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html class="dark" lang="zh-CN">
+
+<head>
+    <meta charset="utf-8">
+    <meta content="width=device-width, initial-scale=1.0" name="viewport">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=block"
+        rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script id="tailwind-config">try {
+            try {
+                tailwind.config = {
+                    darkMode: "class",
+                    theme: {
+                        extend: {
+                            "colors": {
+                                "outline": "#8e9192",
+                                "inverse-surface": "#e3e2e2",
+                                "primary": "#ffffff",
+                                "on-primary-container": "#636565",
+                                "surface-container": "#1f2020",
+                                "secondary-fixed": "#e5e2e1",
+                                "outline-variant": "#444748",
+                                "on-tertiary-fixed-variant": "#005228",
+                                "surface-dim": "#121414",
+                                "surface-container-high": "#292a2a",
+                                "primary-fixed-dim": "#c6c6c7",
+                                "on-secondary-container": "#b7b5b4",
+                                "on-error-container": "#ffdad6",
+                                "on-background": "#e3e2e2",
+                                "tertiary-fixed-dim": "#4ae183",
+                                "on-secondary": "#313030",
+                                "on-error": "#690005",
+                                "surface-tint": "#c6c6c7",
+                                "on-tertiary-fixed": "#00210c",
+                                "on-primary-fixed-variant": "#454747",
+                                "on-tertiary": "#003919",
+                                "surface-bright": "#383939",
+                                "tertiary-fixed": "#6bfe9c",
+                                "inverse-on-surface": "#303031",
+                                "surface-container-lowest": "#0d0e0f",
+                                "surface-container-low": "#1b1c1c",
+                                "on-surface-variant": "#c4c7c8",
+                                "tertiary": "#ffffff",
+                                "surface-container-highest": "#343535",
+                                "secondary": "#c8c6c5",
+                                "primary-container": "#e2e2e2",
+                                "on-primary-fixed": "#1a1c1c",
+                                "on-primary": "#2f3131",
+                                "surface": "#121414",
+                                "on-surface": "#e3e2e2",
+                                "background": "#121414",
+                                "on-tertiary-container": "#00743a",
+                                "error": "#ffb4ab",
+                                "secondary-fixed-dim": "#c8c6c5",
+                                "secondary-container": "#474746",
+                                "tertiary-container": "#6bfe9c",
+                                "inverse-primary": "#5d5f5f",
+                                "error-container": "#93000a",
+                                "surface-variant": "#343535",
+                                "on-secondary-fixed": "#1c1b1b",
+                                "primary-fixed": "#e2e2e2",
+                                "on-secondary-fixed-variant": "#474746"
+                            },
+                            "borderRadius": {
+                                "DEFAULT": "0.25rem",
+                                "lg": "0.5rem",
+                                "xl": "0.75rem",
+                                "full": "9999px"
+                            },
+                            "spacing": {
+                                "grid-major": "32px",
+                                "margin-mobile": "16px",
+                                "margin-desktop": "48px",
+                                "base": "4px",
+                                "gutter": "24px",
+                                "grid-minor": "8px"
+                            },
+                            "fontFamily": {
+                                "headline-lg-mobile": ["Geist", "Inter", "sans-serif"],
+                                "body-sm": ["Geist", "Inter", "sans-serif"],
+                                "headline-lg": ["Geist", "Inter", "sans-serif"],
+                                "label-mono": ["JetBrains Mono", "monospace"],
+                                "body-md": ["Geist", "Inter", "sans-serif"],
+                                "headline-md": ["Geist", "Inter", "sans-serif"]
+                            },
+                            "fontSize": {
+                                "headline-lg-mobile": ["32px", { "lineHeight": "1.2", "letterSpacing": "-0.01em", "fontWeight": "600" }],
+                                "body-sm": ["14px", { "lineHeight": "1.5", "fontWeight": "400" }],
+                                "headline-lg": ["48px", { "lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "600" }],
+                                "label-mono": ["12px", { "lineHeight": "1", "letterSpacing": "0.05em", "fontWeight": "500" }],
+                                "body-md": ["16px", { "lineHeight": "1.6", "letterSpacing": "0", "fontWeight": "400" }],
+                                "headline-md": ["24px", { "lineHeight": "1.4", "letterSpacing": "-0.01em", "fontWeight": "500" }]
+                            }
+                        },
+                    },
+                }
+            } catch (_e) { }
+        } catch (_e) { }</script>
+</head>
+
+<body class="font-body-md text-body-md min-h-screen bg-background spatial-grid" style="background-color: rgb(0, 0, 0);">
+    <!-- TopNavBar -->
+    <header
+        class="fixed top-0 w-full z-50 backdrop-blur-md border-b border-outline-variant py-4 px-margin-desktop bg-black/80">
+        <div class="max-w-7xl mx-auto flex justify-between items-center">
+            <div class="flex items-center gap-8">
+                <div class="font-headline-md text-headline-md font-bold tracking-tighter text-primary">SYNAPSE</div>
+                <nav class="hidden md:flex gap-grid-major items-center">
+                    <a class="font-body-md text-body-md text-primary border-b border-primary pb-1 transition-colors duration-200"
+                        href="#">文章归档</a>
+                    <a class="font-body-md text-body-md text-on-surface-variant hover:text-primary transition-colors duration-200"
+                        href="#">问答系统</a>
+                    <a class="font-body-md text-body-md text-on-surface-variant hover:text-primary transition-colors duration-200"
+                        href="#">虚拟对话</a>
+                </nav>
+            </div>
+            <div class="flex items-center gap-4">
+                <div class="relative hidden sm:block">
+                    <span
+                        class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-sm"
+                        data-icon="search">search</span>
+                    <input
+                        class="bg-surface-container-low border border-outline-variant rounded-full pl-10 pr-4 py-1.5 text-body-sm focus:ring-1 focus:ring-primary focus:border-primary w-64 transition-all"
+                        placeholder="搜索架构、协议或见解..." type="text">
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="pt-24 min-h-screen">
+        <div class="max-w-7xl mx-auto">
+            <!-- Hero Section -->
+            <section class="px-margin-mobile md:px-margin-desktop py-24 border-b border-outline-variant relative">
+                <div class="relative z-10 max-w-4xl">
+                    <div
+                        class="font-label-mono text-label-mono text-tertiary-fixed uppercase mb-4 tracking-[0.2em] animate-pulse">
+                        灵气洞察系统已激活</div>
+                    <h1
+                        class="font-headline-lg text-headline-lg md:text-6xl text-primary mb-8 leading-tight tracking-tighter">
+                        为新认知经济而生的<br>
+                        <span class="text-on-surface-variant">神经架构。</span>
+                    </h1>
+                    <p class="font-body-md text-body-md text-on-surface-variant max-w-2xl mb-12">
+                        接入高保真智能流和自主智能体集群。Synapse 通过数字架构桥接原始数据与可执行见解之间的鸿沟。
+                    </p>
+                    <div class="flex flex-col sm:flex-row gap-4">
+                        <button
+                            class="bg-primary text-on-primary px-8 py-4 font-label-mono text-label-mono uppercase tracking-widest flex items-center justify-center gap-2 group transition-all">
+                            咨询 AI 分析师
+                            <span class="material-symbols-outlined group-hover:translate-x-1 transition-transform"
+                                data-icon="north_east">north_east</span>
+                        </button>
+                        <button
+                            class="border border-primary text-primary px-8 py-4 font-label-mono text-label-mono uppercase tracking-widest hover:bg-white/5 transition-all">
+                            查看网络状态
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Latest Articles (Feature Cards Style) -->
+            <section class="px-margin-mobile md:px-margin-desktop py-grid-major border-b border-outline-variant">
+                <div class="flex justify-between items-end mb-12">
+                    <div>
+                        <h2 class="font-headline-md text-headline-md text-primary uppercase tracking-tighter">最新发布</h2>
+                        <p class="font-label-mono text-label-mono text-on-surface-variant mt-2 uppercase">前沿研究与实时架构更新
+                        </p>
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <!-- Feature Card 1 -->
+                    <div
+                        class="bg-surface-container-low border border-outline-variant p-8 flex flex-col gap-6 hover:border-primary transition-all group">
+                        <div class="flex justify-between items-start">
+                            <span
+                                class="font-label-mono text-[10px] text-tertiary-fixed border border-tertiary-fixed/30 px-2 py-0.5 rounded">#CORE-01</span>
+                            <span
+                                class="material-symbols-outlined text-on-surface-variant group-hover:text-primary transition-colors"
+                                data-icon="auto_awesome">auto_awesome</span>
+                        </div>
+                        <div>
+                            <h3 class="font-headline-md text-xl text-primary mb-2">自主代理通信协议</h3>
+                            <p class="font-body-sm text-on-surface-variant">定义下一代分布式智能体之间的语义握手与任务协调框架。</p>
+                        </div>
+                        <div class="mt-auto pt-4 border-t border-outline-variant flex justify-between items-center">
+                            <span class="font-label-mono text-[10px] text-on-surface-variant uppercase">342KB
+                                研究文档</span>
+                            <span class="material-symbols-outlined text-sm text-on-surface-variant"
+                                data-icon="arrow_forward">arrow_forward</span>
+                        </div>
+                    </div>
+                    <!-- Feature Card 2 -->
+                    <div
+                        class="bg-surface-container-low border border-outline-variant p-8 flex flex-col gap-6 hover:border-primary transition-all group">
+                        <div class="flex justify-between items-start">
+                            <span
+                                class="font-label-mono text-[10px] text-tertiary-fixed border border-tertiary-fixed/30 px-2 py-0.5 rounded">#INFRA-05</span>
+                            <span
+                                class="material-symbols-outlined text-on-surface-variant group-hover:text-primary transition-colors"
+                                data-icon="memory">memory</span>
+                        </div>
+                        <div>
+                            <h3 class="font-headline-md text-xl text-primary mb-2">边缘计算延迟优化</h3>
+                            <p class="font-body-sm text-on-surface-variant">在毫米级响应需求下，如何构建高弹性的边缘神经推理节点。</p>
+                        </div>
+                        <div class="mt-auto pt-4 border-t border-outline-variant flex justify-between items-center">
+                            <span class="font-label-mono text-[10px] text-on-surface-variant uppercase">技术白皮书</span>
+                            <span class="material-symbols-outlined text-sm text-on-surface-variant"
+                                data-icon="arrow_forward">arrow_forward</span>
+                        </div>
+                    </div>
+                    <!-- Feature Card 3 -->
+                    <div
+                        class="bg-surface-container-low border border-outline-variant p-8 flex flex-col gap-6 hover:border-primary transition-all group">
+                        <div class="flex justify-between items-start">
+                            <span
+                                class="font-label-mono text-[10px] text-tertiary-fixed border border-tertiary-fixed/30 px-2 py-0.5 rounded">#SYNTH-09</span>
+                            <span
+                                class="material-symbols-outlined text-on-surface-variant group-hover:text-primary transition-colors"
+                                data-icon="data_exploration">data_exploration</span>
+                        </div>
+                        <div>
+                            <h3 class="font-headline-md text-xl text-primary mb-2">合成数据保真度评估</h3>
+                            <p class="font-body-sm text-on-surface-variant">量化 LLM 训练中合成数据集对基础模型泛化能力的结构性影响。</p>
+                        </div>
+                        <div class="mt-auto pt-4 border-t border-outline-variant flex justify-between items-center">
+                            <span class="font-label-mono text-[10px] text-on-surface-variant uppercase">实验室报告</span>
+                            <span class="material-symbols-outlined text-sm text-on-surface-variant"
+                                data-icon="arrow_forward">arrow_forward</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Historical Archive (Serif Style) -->
+            <section class="px-margin-mobile md:px-margin-desktop py-24">
+                <div class="flex justify-between items-end mb-12">
+                    <div>
+                        <h2 class="font-headline-md text-headline-md text-primary uppercase tracking-tighter">历史存档</h2>
+                        <p class="font-label-mono text-label-mono text-on-surface-variant mt-2 uppercase">深度技术洞察与架构演进
+                        </p>
+                    </div>
+                    <div class="flex gap-2">
+                        <button
+                            class="p-2 border border-outline-variant text-on-surface-variant hover:text-primary transition-colors">
+                            <span class="material-symbols-outlined" data-icon="filter_list">filter_list</span>
+                        </button>
+                        <button
+                            class="p-2 border border-outline-variant text-on-surface-variant hover:text-primary transition-colors">
+                            <span class="material-symbols-outlined" data-icon="search">search</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-12 gap-px bg-outline-variant border border-outline-variant">
+                    <!-- History Article 1 -->
+                    <div
+                        class="md:col-span-12 bg-background p-8 border-b border-outline-variant hover:bg-surface-container-low transition-colors group cursor-pointer flex flex-col gap-4">
+                        <div class="flex flex-col gap-2">
+                            <h3 class="text-2xl font-bold text-primary group-hover:text-tertiary-fixed transition-colors"
+                                style="font-family: serif;">候选人评估三维度</h3>
+                            <p class="text-on-surface-variant text-body-sm">深度解析技术面试中的核心评估框架：能力、潜质与文化契合度。</p>
+                        </div>
+                        <div
+                            class="flex items-center gap-4 font-label-mono text-[10px] text-on-surface-variant uppercase tracking-widest">
+                            <span class="">07-20</span>
+                            <span class="w-1 h-1 bg-outline-variant rounded-full"></span>
+                            <span class="">经验</span>
+                        </div>
+                    </div>
+                    <!-- History Article 2 -->
+                    <div
+                        class="md:col-span-12 bg-background p-8 border-b border-outline-variant hover:bg-surface-container-low transition-colors group cursor-pointer flex flex-col gap-4">
+                        <div class="flex flex-col gap-2">
+                            <h3 class="text-2xl font-bold text-primary group-hover:text-tertiary-fixed transition-colors"
+                                style="font-family: serif;">大语言模型的推理成本优化路径</h3>
+                            <p class="text-on-surface-variant text-body-sm">从量化技术到 KV Cache 管理，探讨生产环境下 LLM 的效能边界。</p>
+                        </div>
+                        <div
+                            class="flex items-center gap-4 font-label-mono text-[10px] text-on-surface-variant uppercase tracking-widest">
+                            <span class="">07-18</span>
+                            <span class="w-1 h-1 bg-outline-variant rounded-full"></span>
+                            <span class="">技术</span>
+                        </div>
+                    </div>
+                    <!-- History Article 3 -->
+                    <div
+                        class="md:col-span-12 bg-background p-8 border-b border-outline-variant hover:bg-surface-container-low transition-colors group cursor-pointer flex flex-col gap-4">
+                        <div class="flex flex-col gap-2">
+                            <h3 class="text-2xl font-bold text-primary group-hover:text-tertiary-fixed transition-colors"
+                                style="font-family: serif;">分布式共识协议的演进：从 Paxos 到 HotStuff</h3>
+                            <p class="text-on-surface-variant text-body-sm">回顾分布式系统核心协议的迭代逻辑及其在现代区块链中的应用。</p>
+                        </div>
+                        <div
+                            class="flex items-center gap-4 font-label-mono text-[10px] text-on-surface-variant uppercase tracking-widest">
+                            <span class="">07-15</span>
+                            <span class="w-1 h-1 bg-outline-variant rounded-full"></span>
+                            <span class="">研究</span>
+                        </div>
+                    </div>
+                    <!-- History Article 4 -->
+                    <div
+                        class="md:col-span-12 bg-background p-8 hover:bg-surface-container-low transition-colors group cursor-pointer flex flex-col gap-4">
+                        <div class="flex flex-col gap-2">
+                            <h3 class="text-2xl font-bold text-primary group-hover:text-tertiary-fixed transition-colors"
+                                style="font-family: serif;">向量数据库在 RAG 架构中的选型指南</h3>
+                            <p class="text-on-surface-variant text-body-sm">对比分析不同向量索引算法在海量知识库检索中的表现。</p>
+                        </div>
+                        <div
+                            class="flex items-center gap-4 font-label-mono text-[10px] text-on-surface-variant uppercase tracking-widest">
+                            <span class="">07-12</span>
+                            <span class="w-1 h-1 bg-outline-variant rounded-full"></span>
+                            <span class="">架构</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Newsletter -->
+            <section
+                class="px-margin-mobile md:px-margin-desktop py-24 flex flex-col md:flex-row gap-grid-major border-t border-outline-variant">
+                <div class="flex-1">
+                    <h4 class="font-headline-md text-headline-md text-primary mb-6">进入研究实验室。</h4>
+                    <p class="font-body-md text-on-surface-variant max-w-sm mb-8">每月接收两次技术简报和神经架构更新。拒绝杂音。</p>
+                    <div
+                        class="flex max-w-md border border-outline-variant focus-within:border-primary transition-colors">
+                        <input
+                            class="bg-transparent border-none focus:ring-0 text-primary font-label-mono w-full px-4 py-3 placeholder:text-outline-variant"
+                            placeholder="身份标识@协议" type="email">
+                        <button
+                            class="bg-primary text-on-primary px-6 py-3 font-label-mono uppercase text-label-mono">提交</button>
+                    </div>
+                </div>
+                <div class="flex-1 flex flex-col gap-6 justify-end md:text-right">
+                    <div class="font-label-mono text-on-surface-variant uppercase">始创于 2024.11.08</div>
+                    <div class="font-label-mono text-on-surface-variant uppercase">存档版本: V.0.4.2_DELTA</div>
+                    <div class="font-label-mono text-primary uppercase">全程端到端加密</div>
+                </div>
+            </section>
+
+            <!-- Footer -->
+        </div>
+    </main>
+</body>
+
+</html>
