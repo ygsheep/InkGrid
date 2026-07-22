@@ -1,0 +1,88 @@
+# 本地开发精简栈：Postgres + Redis + MinIO
+# P0/P1 阶段用，不含 Milvus / Meilisearch（P2+ 接入 RAG 时再起全套）
+#
+# 用法：
+#   cd backend
+#   docker compose -f docker/docker-compose.dev.yml up -d
+#   docker compose -f docker/docker-compose.dev.yml down        # 停止
+#   docker compose -f docker/docker-compose.dev.yml down -v    # 停止并删除数据
+name: inkgrid-dev
+
+services:
+  # ===== PostgreSQL 16 =====
+  postgres:
+    image: postgres:16-alpine
+    container_name: inkgrid-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: inkgrid
+      POSTGRES_PASSWORD: inkgrid
+      POSTGRES_DB: inkgrid
+      # 开发期时区
+      TZ: Asia/Shanghai
+      PGTZ: Asia/Shanghai
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U inkgrid -d inkgrid"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ===== Redis 7（限流 + Celery broker） =====
+  redis:
+    image: redis:7-alpine
+    container_name: inkgrid-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ===== MinIO 对象存储 =====
+  minio:
+    image: minio/minio:latest
+    container_name: inkgrid-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio123
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web Console（浏览器访问 http://localhost:9001）
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9000/minio/health/ready || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ===== 一次性初始化：创建 bucket 并设为公开读 =====
+  minio-init:
+    image: minio/mc:latest
+    container_name: inkgrid-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      sh -c "
+      mc alias set local http://minio:9000 minio minio123 &&
+      mc mb --ignore-existing local/inkgrid &&
+      mc anonymous set download local/inkgrid &&
+      echo '✓ bucket [inkgrid] created and set to public-read'
+      "
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:

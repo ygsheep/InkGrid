@@ -5,14 +5,13 @@ import { useRouter } from 'next/navigation';
 import { ArrowLeft } from 'lucide-react';
 import RoleCard from '@/components/chat/RoleCard';
 import { usePersona } from '@/lib/usePersona';
-import { mockPersonas } from '@/lib/mock';
 
 /**
  * 角色选择页 — 参考 plan/角色选择.html。
  * 卡片网格 + 扫描线 hover + 序号 + 标签芯片 + 初始化身份按钮。
  */
 export default function PersonaPage() {
-  const { personaId, select, hydrated } = usePersona();
+  const { personaId, personas, select, hydrated } = usePersona();
   const router = useRouter();
 
   const handleBack = () => {
@@ -48,7 +47,7 @@ export default function PersonaPage() {
 
         {/* 卡片网格 — 1px 共享边框 */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-0 border-l border-t border-outline-variant">
-          {mockPersonas.map((p) => (
+          {personas.map((p) => (
             <RoleCard
               key={p.id}
               persona={p}
@@ -74,7 +73,7 @@ export default function PersonaPage() {
             </span>
             <span className="font-mono text-label-mono text-primary uppercase tracking-widest">
               {hydrated
-                ? `实体_${mockPersonas.find((p) => p.id === personaId)?.serial ?? '000'}`
+                ? `实体_${personas.find((p) => p.id === personaId)?.serial ?? '000'}`
                 : '实体_001'}
             </span>
             <span className="font-mono text-label-mono text-primary uppercase tracking-widest">

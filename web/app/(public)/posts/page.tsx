@@ -1,9 +1,10 @@
 import ArticleCard from '@/components/blog/ArticleCard';
-import { mockPosts } from '@/lib/mock';
+import { fetchPosts } from '@/lib/api';
 
 export const metadata = { title: '文章' };
 
-export default function PostsPage() {
+export default async function PostsPage() {
+  const { items, total } = await fetchPosts({ size: 100 });
   return (
     <div className="spatial-grid">
       <section className="border-b border-outline-variant">
@@ -14,12 +15,12 @@ export default function PostsPage() {
                 全部文章
               </h1>
               <p className="font-mono text-label-mono text-on-surface-variant mt-2 uppercase">
-                共 {mockPosts.length} 篇 · ARCHIVE
+                共 {total} 篇 · ARCHIVE
               </p>
             </div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {mockPosts.map((p) => (
+            {items.map((p) => (
               <ArticleCard key={p.id} post={p} />
             ))}
           </div>

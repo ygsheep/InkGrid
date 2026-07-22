@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard,
   FileText,
@@ -14,8 +14,11 @@ import {
   LogOut,
   Menu as MenuIcon,
   X,
+  Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useMe, useLogout } from '@/hooks/useAdmin';
+import { App } from 'antd';
 
 const menu = [
   { href: '/admin', label: '看板', icon: LayoutDashboard },
@@ -30,6 +33,9 @@ const menu = [
 /**
  * Admin layout — flat surface (no grid) to favour dense data work.
  * 1px line work, mono labels, zero radius.
+ *
+ * 鉴权：middleware 仅校验 cookie 存在；layout 内 useMe() 校验 JWT 有效性。
+ * 失败时 request 拦截器会跳转 /login，避免页面继续渲染。
  */
 export default function AdminLayout({
   children,
@@ -38,7 +44,19 @@ export default function AdminLayout({
 }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
+  const router = useRouter();
+  const { message } = App.useApp();
   const siteName = (process.env.NEXT_PUBLIC_SITE_NAME || 'inkgrid.dev').toUpperCase();
+
+  // 校验当前博主身份：失败会被 request 拦截器跳 /login
+  const { data: me, isLoading } = useMe();
+  const logout = useLogout({
+    onSuccess: () => {
+      message.success('已退出登录');
+      router.replace('/login');
+      router.refresh();
+    },
+  });
 
   const SidebarContent = (
     <>
@@ -72,13 +90,24 @@ export default function AdminLayout({
         })}
       </nav>
       <div className="p-3 border-t border-outline-variant">
-        <Link
-          href="/"
-          className="flex items-center gap-3 px-3 py-2 text-body-sm font-mono text-label-mono text-on-surface-variant hover:text-error uppercase tracking-wider transition-colors"
+        <div className="px-3 py-2 mb-1 font-mono text-label-mono text-tertiary-fixed uppercase tracking-widest truncate">
+          {isLoading ? (
+            <span className="inline-flex items-center gap-2">
+              <Loader2 size={12} className="animate-spin" />
+              <span>校验中</span>
+            </span>
+          ) : (
+            <span title={me?.username}>{me?.username || '未登录'}</span>
+          )}
+        </div>
+        <button
+          onClick={() => logout.mutate()}
+          disabled={logout.isPending}
+          className="w-full flex items-center gap-3 px-3 py-2 text-body-sm font-mono text-label-mono text-on-surface-variant hover:text-error uppercase tracking-wider transition-colors disabled:opacity-50"
         >
           <LogOut size={16} />
-          <span>退出</span>
-        </Link>
+          <span>{logout.isPending ? '退出中' : '退出'}</span>
+        </button>
       </div>
     </>
   );

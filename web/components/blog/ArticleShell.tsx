@@ -6,11 +6,19 @@ import { ArrowLeft, Network, History, FlipHorizontal } from 'lucide-react';
 import AskBox from '@/components/chat/AskBox';
 import TableOfContents from '@/components/blog/TableOfContents';
 import { formatDate } from '@/lib/utils';
-import type { MockArticle } from '@/app/(public)/posts/[slug]/page';
+import type { Article } from '@/types';
+
+export interface RelatedPost {
+  slug: string;
+  title: string;
+  publishedAt: string;
+}
 
 interface ArticleShellProps {
   slug: string;
-  article: MockArticle;
+  article: Article;
+  /** 相关归档文章（可选，page 通过 fetchChannelPosts 等方式获取） */
+  relatedPosts?: RelatedPost[];
 }
 
 /**
@@ -28,7 +36,7 @@ interface ArticleShellProps {
  */
 const STORAGE_KEY = 'article-sidebar-position';
 
-export default function ArticleShell({ slug, article }: ArticleShellProps) {
+export default function ArticleShell({ slug, article, relatedPosts = [] }: ArticleShellProps) {
   const [sidebarLeft, setSidebarLeft] = useState(false);
   const [hydrated, setHydrated] = useState(false);
 
@@ -47,6 +55,10 @@ export default function ArticleShell({ slug, article }: ArticleShellProps) {
   };
 
   const a = article;
+  // 后端可能返回 html 预渲染，缺省时退回 content（markdown 原文）
+  const html = a.html ?? a.content;
+  const concepts = a.tags ?? [];
+  const readingTimeLabel = a.readingTime ? `${a.readingTime} MIN READ` : 'MIN READ';
 
   return (
     <article className="border-b border-outline-variant">
@@ -88,12 +100,12 @@ export default function ArticleShell({ slug, article }: ArticleShellProps) {
               <span className="w-1 h-1 bg-outline-variant" />
               <span>{a.channelName}</span>
               <span className="w-1 h-1 bg-outline-variant" />
-              <span>{a.readingTime} MIN READ</span>
+              <span>{readingTimeLabel}</span>
             </div>
 
             <div
               className="article-content mt-10"
-              dangerouslySetInnerHTML={{ __html: a.content }}
+              dangerouslySetInnerHTML={{ __html: html }}
             />
 
             {/* 文末问 AI */}
@@ -112,49 +124,53 @@ export default function ArticleShell({ slug, article }: ArticleShellProps) {
             }`}
           >
             <div className="sticky top-24 space-y-8">
-              <TableOfContents items={a.toc} />
+              <TableOfContents items={a.toc ?? []} />
 
               {/* 核心概念实体 */}
-              <section className="border border-outline-variant bg-surface-container-lowest/60 p-6 space-y-4">
-                <h3 className="font-mono text-label-mono text-on-surface-variant uppercase tracking-widest flex items-center gap-2">
-                  <Network size={12} className="text-tertiary-fixed" />
-                  核心概念实体
-                </h3>
-                <div className="flex flex-wrap gap-2">
-                  {a.concepts.map((c) => (
-                    <span
-                      key={c}
-                      className="bg-surface-container-high px-2 py-1 font-mono text-label-mono text-on-surface-variant uppercase border border-outline-variant hover:border-primary hover:text-primary cursor-pointer transition-all tracking-wider"
-                    >
-                      {c}
-                    </span>
-                  ))}
-                </div>
-              </section>
+              {concepts.length > 0 && (
+                <section className="border border-outline-variant bg-surface-container-lowest/60 p-6 space-y-4">
+                  <h3 className="font-mono text-label-mono text-on-surface-variant uppercase tracking-widest flex items-center gap-2">
+                    <Network size={12} className="text-tertiary-fixed" />
+                    核心概念实体
+                  </h3>
+                  <div className="flex flex-wrap gap-2">
+                    {concepts.map((c) => (
+                      <span
+                        key={c}
+                        className="bg-surface-container-high px-2 py-1 font-mono text-label-mono text-on-surface-variant uppercase border border-outline-variant hover:border-primary hover:text-primary cursor-pointer transition-all tracking-wider"
+                      >
+                        {c}
+                      </span>
+                    ))}
+                  </div>
+                </section>
+              )}
 
               {/* 相关归档文章 */}
-              <section className="border border-outline-variant bg-surface-container-lowest/60 p-6 space-y-6">
-                <h3 className="font-mono text-label-mono text-on-surface-variant uppercase tracking-widest flex items-center gap-2">
-                  <History size={12} className="text-tertiary-fixed" />
-                  相关归档文章
-                </h3>
-                <div className="space-y-5">
-                  {a.relatedPosts.map((r) => (
-                    <Link
-                      key={r.slug}
-                      href={`/posts/${r.slug}`}
-                      className="group block"
-                    >
-                      <div className="font-mono text-label-mono text-tertiary-fixed uppercase tracking-widest mb-1">
-                        {formatDate(r.publishedAt)}
-                      </div>
-                      <div className="font-sans text-body-sm text-on-surface group-hover:text-primary transition-colors leading-tight">
-                        {r.title}
-                      </div>
-                    </Link>
-                  ))}
-                </div>
-              </section>
+              {relatedPosts.length > 0 && (
+                <section className="border border-outline-variant bg-surface-container-lowest/60 p-6 space-y-6">
+                  <h3 className="font-mono text-label-mono text-on-surface-variant uppercase tracking-widest flex items-center gap-2">
+                    <History size={12} className="text-tertiary-fixed" />
+                    相关归档文章
+                  </h3>
+                  <div className="space-y-5">
+                    {relatedPosts.map((r) => (
+                      <Link
+                        key={r.slug}
+                        href={`/posts/${r.slug}`}
+                        className="group block"
+                      >
+                        <div className="font-mono text-label-mono text-tertiary-fixed uppercase tracking-widest mb-1">
+                          {formatDate(r.publishedAt)}
+                        </div>
+                        <div className="font-sans text-body-sm text-on-surface group-hover:text-primary transition-colors leading-tight">
+                          {r.title}
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
+                </section>
+              )}
             </div>
           </aside>
         </div>

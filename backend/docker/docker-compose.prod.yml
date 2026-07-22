@@ -1,0 +1,16 @@
+# 生产覆盖配置：关闭 reload，启用多 worker，绑定外部网络
+# 使用：docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+services:
+  web:
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+    restart: always
+    volumes: []
+
+  worker:
+    command: celery -A app.tasks.celery_app worker -l info --concurrency=4
+    restart: always
+    volumes: []
+
+  beat:
+    restart: always
+    volumes: []

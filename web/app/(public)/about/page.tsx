@@ -1,8 +1,23 @@
-export const metadata = { title: '关于' };
+import { fetchAbout } from '@/lib/api';
 
-export default function AboutPage() {
-  const author = process.env.NEXT_PUBLIC_SITE_AUTHOR || '张三';
-  const siteName = process.env.NEXT_PUBLIC_SITE_NAME || 'inkgrid.dev';
+export async function generateMetadata() {
+  try {
+    const about = await fetchAbout();
+    return { title: `关于 · ${about.siteName}` };
+  } catch {
+    return { title: '关于' };
+  }
+}
+
+export default async function AboutPage() {
+  let about;
+  try {
+    about = await fetchAbout();
+  } catch {
+    about = null;
+  }
+  const author = about?.author ?? process.env.NEXT_PUBLIC_SITE_AUTHOR ?? '博主';
+  const siteName = about?.siteName ?? process.env.NEXT_PUBLIC_SITE_NAME ?? 'inkgrid.dev';
 
   return (
     <div className="border-b border-outline-variant">

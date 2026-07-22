@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { Drawer } from 'antd';
 import { ArrowLeft, Mic, Send, Plus, Phone, User, ChevronDown, Check } from 'lucide-react';
 import { usePersona } from '@/lib/usePersona';
-import { mockPersonas } from '@/lib/mock';
 
 interface Msg {
   role: 'user' | 'assistant';
@@ -36,12 +35,15 @@ function nowTime() {
  *  - 移动端 max-w-md 单列，桌面端 max-w-chat 居中
  */
 export default function AskPage() {
+  // 初始消息的 timestamp 留空，避免 SSR 与 hydration 时间不一致导致
+  // "Text content does not match server-rendered HTML" 错误。真实时间在
+  // useEffect 中设置。
   const [messages, setMessages] = useState<Msg[]>([
     {
       role: 'assistant',
       content:
         '上行链路已建立。我基于博主的文章知识库回答你的问题——每一次回答都会标注引用出处。请发送指令或提问。',
-      timestamp: nowTime(),
+      timestamp: '',
     },
   ]);
   const [input, setInput] = useState('');
@@ -50,7 +52,16 @@ export default function AskPage() {
   const [personaDrawerOpen, setPersonaDrawerOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const { persona, personaId, select, hydrated } = usePersona();
+  const { persona, personaId, personas, select, hydrated } = usePersona();
+
+  // hydration 完成后补设初始消息的时间戳
+  useEffect(() => {
+    setMessages((prev) =>
+      prev.length > 0 && prev[0].timestamp === ''
+        ? [{ ...prev[0], timestamp: nowTime() }, ...prev.slice(1)]
+        : prev,
+    );
+  }, []);
 
   // 从首页/文章页带过来的初始问题
   useEffect(() => {
@@ -281,7 +292,7 @@ export default function AskPage() {
         }}
       >
         <div className="flex flex-col">
-          {mockPersonas.map((p) => {
+          {personas.map((p) => {
             const active = hydrated && p.id === personaId;
             return (
               <button

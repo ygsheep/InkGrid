@@ -7,14 +7,9 @@ import { Drawer } from 'antd';
 import { Menu, Search, MessageSquare, Mic, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-const navLinks = [
-  { href: '/', label: '首页' },
-  { href: '/posts', label: '文章' },
-  { href: '/channel/channel', label: '经验' },
-  { href: '/channel/policy', label: '政策' },
-  { href: '/ask/persona', label: 'AI 角色' },
-  { href: '/about', label: '关于' },
-];
+interface NavbarProps {
+  channels?: { slug: string; name: string }[];
+}
 
 const actions = [
   { href: '/search', icon: Search, label: '搜索' },
@@ -26,12 +21,23 @@ const actions = [
 /**
  * TopNavBar — fixed, full-width, 1px outline-variant bottom border.
  * Edge-to-edge functional zone, zero-radius, mono labels.
+ *
+ * 频道列表由 (public)/layout.tsx 在 RSC 层拉取并传入；后端不可用时
+ * channels 为空数组，仅渲染固定链接，避免出现指向不存在 slug 的死链。
  */
-export default function Navbar() {
+export default function Navbar({ channels = [] }: NavbarProps) {
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
   const siteName = (process.env.NEXT_PUBLIC_SITE_NAME || 'inkgrid.dev').toUpperCase();
+
+  const navLinks = [
+    { href: '/', label: '首页' },
+    { href: '/posts', label: '文章' },
+    ...channels.map((c) => ({ href: `/channel/${c.slug}`, label: c.name })),
+    { href: '/ask/persona', label: 'AI 角色' },
+    { href: '/about', label: '关于' },
+  ];
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
