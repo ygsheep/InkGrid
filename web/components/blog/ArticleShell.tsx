@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { ReactNode, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Network, History, FlipHorizontal } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Network, History, FlipHorizontal } from 'lucide-react';
 import AskBox from '@/components/chat/AskBox';
 import TableOfContents from '@/components/blog/TableOfContents';
 import { formatDate } from '@/lib/utils';
@@ -17,8 +17,15 @@ export interface RelatedPost {
 interface ArticleShellProps {
   slug: string;
   article: Article;
+  /** 由 server component 渲染好的 markdown 内容 */
+  children?: ReactNode;
   /** 相关归档文章（可选，page 通过 fetchChannelPosts 等方式获取） */
   relatedPosts?: RelatedPost[];
+  /** 上一篇 / 下一篇导航（可选，page 通过 fetchAdjacentPosts 获取） */
+  adjacentPosts?: {
+    prev: { slug: string; title: string; publishedAt: string } | null;
+    next: { slug: string; title: string; publishedAt: string } | null;
+  };
 }
 
 /**
@@ -36,7 +43,7 @@ interface ArticleShellProps {
  */
 const STORAGE_KEY = 'article-sidebar-position';
 
-export default function ArticleShell({ slug, article, relatedPosts = [] }: ArticleShellProps) {
+export default function ArticleShell({ slug, article, relatedPosts = [], adjacentPosts, children }: ArticleShellProps) {
   const [sidebarLeft, setSidebarLeft] = useState(false);
   const [hydrated, setHydrated] = useState(false);
 
@@ -55,8 +62,6 @@ export default function ArticleShell({ slug, article, relatedPosts = [] }: Artic
   };
 
   const a = article;
-  // 后端可能返回 html 预渲染，缺省时退回 content（markdown 原文）
-  const html = a.html ?? a.content;
   const concepts = a.tags ?? [];
   const readingTimeLabel = a.readingTime ? `${a.readingTime} MIN READ` : 'MIN READ';
 
@@ -103,10 +108,76 @@ export default function ArticleShell({ slug, article, relatedPosts = [] }: Artic
               <span>{readingTimeLabel}</span>
             </div>
 
-            <div
-              className="article-content mt-10"
-              dangerouslySetInnerHTML={{ __html: html }}
-            />
+            <div className="article-content mt-10">
+              {children}
+            </div>
+
+            {/* 上一篇 / 下一篇导航 */}
+            {adjacentPosts && (adjacentPosts.prev || adjacentPosts.next) && (
+              <nav
+                aria-label="上一篇 / 下一篇"
+                className="mt-16 border-t border-outline-variant pt-8"
+              >
+                <p className="font-mono text-label-mono text-on-surface-variant mb-4 uppercase tracking-widest">
+                  CONTINUE READING
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* 上一篇 */}
+                  <div className="min-h-[5rem]">
+                    {adjacentPosts.prev ? (
+                      <Link
+                        href={`/posts/${adjacentPosts.prev.slug}`}
+                        className="group flex flex-col gap-2 border border-outline-variant p-5 h-full transition-colors hover:border-primary"
+                      >
+                        <span className="font-mono text-label-mono text-on-surface-variant uppercase tracking-widest flex items-center gap-1.5">
+                          <ArrowLeft size={12} />
+                          上一篇 · PREV
+                        </span>
+                        <span className="font-mono text-label-mono text-tertiary-fixed uppercase tracking-widest">
+                          {formatDate(adjacentPosts.prev.publishedAt)}
+                        </span>
+                        <span className="font-sans text-body-sm text-on-surface group-hover:text-primary transition-colors leading-tight">
+                          {adjacentPosts.prev.title}
+                        </span>
+                      </Link>
+                    ) : (
+                      <div className="border border-outline-variant p-5 h-full opacity-40">
+                        <span className="font-mono text-label-mono text-tertiary-fixed uppercase tracking-widest">
+                          上一篇 · PREV
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 下一篇 */}
+                  <div className="min-h-[5rem]">
+                    {adjacentPosts.next ? (
+                      <Link
+                        href={`/posts/${adjacentPosts.next.slug}`}
+                        className="group flex flex-col gap-2 border border-outline-variant p-5 h-full text-right transition-colors hover:border-primary"
+                      >
+                        <span className="font-mono text-label-mono text-on-surface-variant uppercase tracking-widest flex items-center justify-end gap-1.5">
+                          下一篇 · NEXT
+                          <ArrowRight size={12} />
+                        </span>
+                        <span className="font-mono text-label-mono text-tertiary-fixed uppercase tracking-widest">
+                          {formatDate(adjacentPosts.next.publishedAt)}
+                        </span>
+                        <span className="font-sans text-body-sm text-on-surface group-hover:text-primary transition-colors leading-tight">
+                          {adjacentPosts.next.title}
+                        </span>
+                      </Link>
+                    ) : (
+                      <div className="border border-outline-variant p-5 h-full text-right opacity-40">
+                        <span className="font-mono text-label-mono text-tertiary-fixed uppercase tracking-widest">
+                          下一篇 · NEXT
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </nav>
+            )}
 
             {/* 文末问 AI */}
             <div className="mt-16 border-t border-outline-variant pt-8">

@@ -63,10 +63,16 @@ app.add_middleware(
     CORSMiddleware,
     # localhost 与 127.0.0.1 浏览器视为不同 origin，需同时允许；
     # settings.next_public_api_base 由 .env 控制（生产部署时设为实际域名）。
+    # cors_extra_origins 用于局域网联调(填开发机 IP),逗号分隔。
     allow_origins=[
         settings.next_public_api_base,
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        *[
+            origin.strip()
+            for origin in settings.cors_extra_origins.split(",")
+            if origin.strip()
+        ],
     ],
     allow_credentials=True,
     allow_methods=["*"],

@@ -73,17 +73,80 @@ async def get_post(db: DBSession, slug: str) -> dict:
     return envelope(_to_article(p).model_dump())
 
 
+@router.get("/posts/{slug}/adjacent")
+async def get_adjacent_posts(db: DBSession, slug: str) -> dict:
+    """获取同频道的上一篇/下一篇已发布文章。
+
+    按 published_at 降序排列,返回 prev(较新)和 next(较旧)。
+    """
+    from sqlalchemy import select
+    from app.models.post import Post
+    from app.models.channel import Channel
+    from sqlalchemy.orm import selectinload
+
+    current = await post_crud.get_by_slug(db, slug, only_published=True)
+    if not current:
+        raise NotFoundError("文章不存在")
+
+    # 上一篇(更新的文章)
+    prev_stmt = (
+        select(Post)
+        .options(selectinload(Post.channel))
+        .join(Channel)
+        .where(
+            Post.status == "published",
+            Post.channel_id == current.channel_id,
+            Post.id != current.id,
+            Post.published_at > current.published_at if current.published_at else Post.published_at.isnot(None),
+        )
+        .order_by(Post.published_at.asc())
+        .limit(1)
+    )
+    prev_post = (await db.execute(prev_stmt)).scalar_one_or_none()
+
+    # 下一篇(更老的文章)
+    next_stmt = (
+        select(Post)
+        .options(selectinload(Post.channel))
+        .join(Channel)
+        .where(
+            Post.status == "published",
+            Post.channel_id == current.channel_id,
+            Post.id != current.id,
+            Post.published_at < current.published_at if current.published_at else Post.published_at.is_(None),
+        )
+        .order_by(Post.published_at.desc())
+        .limit(1)
+    )
+    next_post = (await db.execute(next_stmt)).scalar_one_or_none()
+
+    def _adjacent_summary(p):
+        return {
+            "slug": p.slug,
+            "title": p.title,
+            "channel": p.channel.slug if p.channel else "",
+            "channelName": p.channel.name if p.channel else "",
+            "publishedAt": p.published_at.isoformat() if p.published_at else "",
+        }
+
+    return envelope({
+        "prev": _adjacent_summary(prev_post) if prev_post else None,
+        "next": _adjacent_summary(next_post) if next_post else None,
+    })
+
+
 @router.get("/channels/{slug}/posts")
 async def list_channel_posts(
     db: DBSession,
     slug: str,
+    tag: str | None = Query(None, description="标签筛选"),
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
 ) -> dict:
-    """频道下的文章列表。"""
+    """频道下的文章列表(可按标签筛选)。"""
     offset = (page - 1) * size
     items, total = await post_crud.list_by_channel_slug(
-        db, slug, offset=offset, limit=size
+        db, slug, tag=tag, offset=offset, limit=size
     )
     page_obj = Page[ArticleSummary](
         items=[_to_summary(p) for p in items],

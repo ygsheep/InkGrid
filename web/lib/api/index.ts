@@ -31,20 +31,55 @@ export async function fetchPosts(opts?: {
   page?: number;
   size?: number;
   channel?: string;
+  tag?: string;
+  q?: string;
   revalidate?: number;
 }): Promise<Paginated<ArticleSummary>> {
   const params = new URLSearchParams();
   if (opts?.page) params.set('page', String(opts.page));
   if (opts?.size) params.set('size', String(opts.size));
   if (opts?.channel) params.set('channel', opts.channel);
+  if (opts?.tag) params.set('tag', opts.tag);
+  if (opts?.q) params.set('q', opts.q);
   const qs = params.toString();
   return serverFetch<Paginated<ArticleSummary>>(`/posts${qs ? `?${qs}` : ''}`, {
-    revalidate: opts?.revalidate ?? 60,
+    tags: ['posts'],
   });
 }
 
-export async function fetchPost(slug: string, revalidate = 60): Promise<Article> {
-  return serverFetch<Article>(`/posts/${slug}`, { revalidate });
+export async function fetchPost(slug: string): Promise<Article> {
+  return serverFetch<Article>(`/posts/${slug}`, { tags: ['posts', `post:${slug}`] });
+}
+
+export interface AdjacentPost {
+  slug: string;
+  title: string;
+  channel: string;
+  channelName: string;
+  publishedAt: string;
+}
+
+export interface AdjacentPosts {
+  prev: AdjacentPost | null;
+  next: AdjacentPost | null;
+}
+
+export async function fetchAdjacentPosts(slug: string): Promise<AdjacentPosts> {
+  return serverFetch<AdjacentPosts>(`/posts/${slug}/adjacent`, {
+    tags: ['posts', `post:${slug}`],
+  });
+}
+
+export interface TagWithCount {
+  tag: string;
+  count: number;
+}
+
+export async function fetchChannelTags(
+  slug: string,
+  revalidate = 300,
+): Promise<{ items: TagWithCount[]; total: number }> {
+  return serverFetch(`/channels/${slug}/tags`, { tags: ['posts'], revalidate });
 }
 
 export async function fetchChannels(revalidate = 300): Promise<Channel[]> {
@@ -56,11 +91,20 @@ export async function fetchChannel(slug: string, revalidate = 300): Promise<Chan
   return serverFetch<Channel>(`/channels/${slug}`, { revalidate });
 }
 
-export async function fetchChannelPosts(slug: string, revalidate = 60): Promise<ArticleSummary[]> {
-  const res = await serverFetch<Paginated<ArticleSummary>>(`/channels/${slug}/posts`, {
-    revalidate,
-  });
-  return res.items;
+export async function fetchChannelPosts(
+  slug: string,
+  opts?: { tag?: string; page?: number; size?: number },
+): Promise<{ items: ArticleSummary[]; total: number }> {
+  const params = new URLSearchParams();
+  if (opts?.tag) params.set('tag', opts.tag);
+  if (opts?.page) params.set('page', String(opts.page));
+  if (opts?.size) params.set('size', String(opts.size));
+  const qs = params.toString();
+  const res = await serverFetch<Paginated<ArticleSummary>>(
+    `/channels/${slug}/posts${qs ? `?${qs}` : ''}`,
+    { tags: ['posts'] },
+  );
+  return { items: res.items, total: res.total };
 }
 
 export async function fetchPersonas(revalidate = 300): Promise<Persona[]> {

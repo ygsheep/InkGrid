@@ -2,10 +2,11 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { App, Button, Input, Select, Space, Table, Tag, Tooltip } from 'antd';
+import { useRouter } from 'next/navigation';
+import { App, Button, Input, Modal, Select, Space, Table, Tag, Tooltip, Upload } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { Edit3, Plus, Trash2, Send, Archive, FileEdit } from 'lucide-react';
-import { useAdminChannels, useAdminPosts, useDeletePost, useSetPostStatus } from '@/hooks/useAdmin';
+import { Edit3, Plus, Trash2, Send, Archive, FileEdit, Upload as UploadIcon } from 'lucide-react';
+import { useAdminChannels, useAdminPosts, useDeletePost, useSetPostStatus, useUploadPostMd } from '@/hooks/useAdmin';
 import type { AdminPost } from '@/lib/api/admin';
 import { formatDate } from '@/lib/utils';
 
@@ -30,6 +31,7 @@ const STATUS_COLOR: Record<string, string> = {
 
 export default function AdminPostsPage() {
   const { message, modal } = App.useApp();
+  const router = useRouter();
   const [filters, setFilters] = useState<{ status: string; channel_id: string; q: string }>({
     status: '',
     channel_id: '',
@@ -37,6 +39,11 @@ export default function AdminPostsPage() {
   });
   const [page, setPage] = useState(1);
   const [size, setSize] = useState(20);
+
+  // 上传 MD 文件
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadChannelId, setUploadChannelId] = useState<string>('');
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
 
   // 拉频道列表作为筛选项
   const { data: channelsData } = useAdminChannels({ size: 200 });
@@ -57,6 +64,17 @@ export default function AdminPostsPage() {
 
   const setStatus = useSetPostStatus({
     onSuccess: (data) => message.success(`已切换为「${STATUS_LABEL[data.status] || data.status}」`),
+    onError: (e) => message.error(e.message),
+  });
+
+  const uploadPostMd = useUploadPostMd({
+    onSuccess: (data) => {
+      message.success('已导入,跳转编辑页');
+      setUploadOpen(false);
+      setUploadFile(null);
+      setUploadChannelId('');
+      router.push(`/admin/posts/${data.id}/edit`);
+    },
     onError: (e) => message.error(e.message),
   });
 
@@ -223,11 +241,16 @@ export default function AdminPostsPage() {
             POSTS · 列表 / 编辑 / 发布
           </p>
         </div>
-        <Link href="/admin/posts/new">
-          <Button type="primary" icon={<Plus size={14} />}>
-            新建文章
+        <Space>
+          <Button icon={<UploadIcon size={14} />} onClick={() => setUploadOpen(true)}>
+            上传 MD
           </Button>
-        </Link>
+          <Link href="/admin/posts/new">
+            <Button type="primary" icon={<Plus size={14} />}>
+              新建文章
+            </Button>
+          </Link>
+        </Space>
       </div>
 
       {/* Filter bar */}
@@ -290,6 +313,80 @@ export default function AdminPostsPage() {
         size="middle"
         scroll={{ x: 980 }}
       />
+
+      {/* 上传 MD Modal */}
+      <Modal
+        title="上传 Markdown 文件"
+        open={uploadOpen}
+        onCancel={() => {
+          setUploadOpen(false);
+          setUploadFile(null);
+          setUploadChannelId('');
+        }}
+        onOk={() => {
+          if (!uploadFile) {
+            message.warning('请选择 .md 文件');
+            return;
+          }
+          if (!uploadChannelId) {
+            message.warning('请选择频道');
+            return;
+          }
+          uploadPostMd.mutate({ file: uploadFile, channelId: uploadChannelId });
+        }}
+        okText="解析并创建草稿"
+        cancelText="取消"
+        confirmLoading={uploadPostMd.isPending}
+        okButtonProps={{ disabled: !uploadFile || !uploadChannelId }}
+      >
+        <div className="space-y-4 py-2">
+          <div>
+            <div className="font-mono text-label-mono text-on-surface-variant uppercase tracking-widest mb-2">
+              频道
+            </div>
+            <Select
+              value={uploadChannelId || undefined}
+              onChange={setUploadChannelId}
+              placeholder="选择频道"
+              style={{ width: '100%' }}
+              options={(channelsData?.items || []).map((c) => ({
+                label: c.name,
+                value: c.id,
+              }))}
+            />
+          </div>
+          <div>
+            <div className="font-mono text-label-mono text-on-surface-variant uppercase tracking-widest mb-2">
+              Markdown 文件
+            </div>
+            <Upload
+              accept=".md,.markdown"
+              maxCount={1}
+              beforeUpload={(file) => {
+                setUploadFile(file);
+                return false; // 阻止自动上传,由 Modal onOk 触发
+              }}
+              onRemove={() => setUploadFile(null)}
+              fileList={
+                uploadFile
+                  ? [
+                      {
+                        uid: '-1',
+                        name: uploadFile.name,
+                        status: 'done',
+                      },
+                    ]
+                  : []
+              }
+            >
+              <Button icon={<UploadIcon size={14} />}>选择 .md 文件</Button>
+            </Upload>
+            <div className="font-mono text-label-mono text-tertiary-fixed mt-2">
+              仅支持 .md / .markdown,≤ 5MB,UTF-8 编码
+            </div>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

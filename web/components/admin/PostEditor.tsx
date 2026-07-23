@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { App, Button, Form, Input, InputNumber, Select, Space } from 'antd';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Check } from 'lucide-react';
 import {
   useAdminChannels,
   useCreatePost,
@@ -15,6 +15,8 @@ import type {
   PostCreatePayload,
   PostUpdatePayload,
 } from '@/lib/api/admin';
+import MarkdownEditor from '@/components/editor/MarkdownEditor';
+import { slugify } from '@/lib/utils';
 
 type FormValues = {
   slug: string;
@@ -33,17 +35,34 @@ const STATUS_OPTIONS = [
   { label: '已归档', value: 'archived' },
 ];
 
+/** 草稿自动保存间隔(毫秒) */
+const AUTOSAVE_DELAY = 5000;
+
 /**
- * 后台文章编辑器（共用新建/编辑）。
- * P0 阶段先用 textarea；后续接入 Bytemd 源码+预览编辑器。
+ * 后台文章编辑器(共用新建/编辑)。
  *
- * 编辑模式传入 post 时，会预填表单。
+ * 功能:
+ * - slug 自动生成:title 变化时,若 slug 未被手动编辑过,自动从 title 生成
+ * - 草稿自动保存:编辑模式下,内容变更后防抖 5s 自动保存(仅 draft 状态)
+ * - Bytemd 源码 + 预览分屏,插件链与博客展示端一致
+ *
+ * 编辑模式传入 post 时,会预填表单。
  */
 export default function PostEditor({ post }: { post?: AdminPost }) {
   const router = useRouter();
   const { message } = App.useApp();
   const [form] = Form.useForm<FormValues>();
   const isEdit = !!post;
+
+  // slug 是否被用户手动编辑过(若否,则跟随 title 自动生成)
+  const slugTouchedRef = useRef(false);
+
+  // 自动保存状态
+  const [autoSaveStatus, setAutoSaveStatus] = useState<
+    'idle' | 'pending' | 'saving' | 'saved'
+  >('idle');
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestValuesRef = useRef<FormValues | null>(null);
 
   // 频道列表
   const { data: channelsData, isLoading: channelsLoading } = useAdminChannels({
@@ -59,13 +78,19 @@ export default function PostEditor({ post }: { post?: AdminPost }) {
   });
 
   const updatePost = useUpdatePost({
-    onSuccess: () => message.success('已保存'),
-    onError: (e) => message.error(e.message),
+    onSuccess: () => {
+      // 手动保存时不弹 message,由 autoSaveStatus 提示
+    },
+    onError: (e) => {
+      message.error(e.message);
+      setAutoSaveStatus('idle');
+    },
   });
 
   // 预填表单
   useEffect(() => {
     if (!post) return;
+    slugTouchedRef.current = true; // 编辑模式不自动覆盖已有 slug
     form.setFieldsValue({
       slug: post.slug,
       title: post.title,
@@ -78,7 +103,79 @@ export default function PostEditor({ post }: { post?: AdminPost }) {
     });
   }, [post, form]);
 
+  // title 变化时自动生成 slug(仅新建模式 或 slug 未被手动编辑时)
+  const handleTitleChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const title = e.target.value;
+      form.setFieldValue('title', title);
+      if (!slugTouchedRef.current) {
+        form.setFieldValue('slug', slugify(title));
+      }
+    },
+    [form],
+  );
+
+  // slug 字段被手动编辑时,标记 touched
+  const handleSlugChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      slugTouchedRef.current = true;
+      form.setFieldValue('slug', e.target.value);
+    },
+    [form],
+  );
+
+  // 草稿自动保存:监听表单变化,防抖 5s 后保存
+  const triggerAutoSave = useCallback(
+    (values: FormValues) => {
+      if (!isEdit || !post) return;
+      if (values.status !== 'draft') return; // 仅草稿自动保存
+      if (autoSaveStatus === 'saving') return;
+
+      latestValuesRef.current = values;
+      setAutoSaveStatus('pending');
+
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+      }
+      autoSaveTimerRef.current = setTimeout(async () => {
+        const v = latestValuesRef.current;
+        if (!v || !post) return;
+        setAutoSaveStatus('saving');
+        const payload: PostUpdatePayload = {
+          slug: v.slug,
+          title: v.title,
+          excerpt: v.excerpt || null,
+          channel_id: v.channel_id,
+          tags: v.tags?.length ? v.tags : null,
+          content_md: v.content_md,
+          status: v.status,
+          reading_time: v.reading_time || null,
+        };
+        try {
+          await updatePost.mutateAsync({ id: post.id, payload });
+          setAutoSaveStatus('saved');
+        } catch {
+          setAutoSaveStatus('idle');
+        }
+      }, AUTOSAVE_DELAY);
+    },
+    [isEdit, post, autoSaveStatus, updatePost],
+  );
+
+  // 清理定时器
+  useEffect(() => {
+    return () => {
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+      }
+    };
+  }, []);
+
   const onFinish = (values: FormValues) => {
+    // 提交前取消未执行的自动保存
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+    }
     const tags = values.tags?.length ? values.tags : null;
     if (isEdit && post) {
       const payload: PostUpdatePayload = {
@@ -91,7 +188,15 @@ export default function PostEditor({ post }: { post?: AdminPost }) {
         status: values.status,
         reading_time: values.reading_time || null,
       };
-      updatePost.mutate({ id: post.id, payload });
+      updatePost.mutate(
+        { id: post.id, payload },
+        {
+          onSuccess: () => {
+            message.success('已保存');
+            setAutoSaveStatus('idle');
+          },
+        },
+      );
     } else {
       const payload: PostCreatePayload = {
         slug: values.slug,
@@ -126,6 +231,19 @@ export default function PostEditor({ post }: { post?: AdminPost }) {
           </div>
         </div>
         <Space>
+          {/* 草稿自动保存状态指示 */}
+          {isEdit && autoSaveStatus !== 'idle' && (
+            <span className="font-mono text-label-mono text-on-surface-variant uppercase tracking-widest flex items-center gap-1">
+              {autoSaveStatus === 'pending' && <span className="text-tertiary-fixed">编辑中…</span>}
+              {autoSaveStatus === 'saving' && <span className="text-tertiary-fixed">保存中…</span>}
+              {autoSaveStatus === 'saved' && (
+                <>
+                  <Check size={12} className="text-primary" />
+                  <span className="text-primary">已自动保存</span>
+                </>
+              )}
+            </span>
+          )}
           <Link href="/admin/posts">
             <Button>取消</Button>
           </Link>
@@ -143,49 +261,57 @@ export default function PostEditor({ post }: { post?: AdminPost }) {
         form={form}
         layout="vertical"
         onFinish={onFinish}
+        onValuesChange={(_, allValues) => triggerAutoSave(allValues)}
         initialValues={{
           status: 'draft',
         }}
         requiredMark={false}
       >
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-6">
-          {/* 主区：标题 + 正文 */}
+          {/* 主区:标题 + 正文 */}
           <div className="space-y-4">
             <Form.Item
               name="title"
               label={fieldLabel('标题')}
               rules={[{ required: true, message: '请输入标题' }]}
             >
-              <Input size="large" placeholder="文章标题" />
+              <Input
+                size="large"
+                placeholder="文章标题"
+                onChange={handleTitleChange}
+              />
             </Form.Item>
 
             <Form.Item
               name="content_md"
-              label={fieldLabel('正文（Markdown）')}
+              label={fieldLabel('正文(Markdown · 源码/预览分屏)')}
               rules={[{ required: true, message: '请输入正文' }]}
               extra={
                 <span className="font-mono text-label-mono text-tertiary-fixed uppercase tracking-widest">
-                  TEXTAREA · 后续接入 BYTEMD 编辑器
+                  BYTEMD · GFM / HIGHLIGHT / MATH / MERMAID · 粘贴或拖拽图片自动上传
+                </span>
+              }
+            >
+              <MarkdownEditor placeholder="## 标题&#10;&#10;支持 GFM、代码高亮、数学公式、Mermaid 图表" />
+            </Form.Item>
+
+            <Form.Item
+              name="excerpt"
+              label={fieldLabel('摘要')}
+              extra={
+                <span className="font-mono text-label-mono text-tertiary-fixed">
+                  留空则从正文首段自动生成
                 </span>
               }
             >
               <Input.TextArea
-                autoSize={{ minRows: 20, maxRows: 40 }}
-                placeholder="## 标题&#10;&#10;支持 Markdown 语法"
-                className="font-mono text-body-md"
-                style={{ fontFamily: 'var(--font-jetbrains), monospace' }}
-              />
-            </Form.Item>
-
-            <Form.Item name="excerpt" label={fieldLabel('摘要')}>
-              <Input.TextArea
                 autoSize={{ minRows: 2, maxRows: 4 }}
-                placeholder="一行简介（可空）"
+                placeholder="一行简介(留空自动生成)"
               />
             </Form.Item>
           </div>
 
-          {/* 侧栏：元信息 */}
+          {/* 侧栏:元信息 */}
           <div className="space-y-4">
             <div className="border border-outline-variant bg-surface-container-lowest p-4 space-y-4">
               <Form.Item
@@ -214,15 +340,23 @@ export default function PostEditor({ post }: { post?: AdminPost }) {
               <Form.Item
                 name="slug"
                 label={fieldLabel('Slug')}
+                extra={
+                  <span className="font-mono text-label-mono text-tertiary-fixed">
+                    留空则从标题自动生成
+                  </span>
+                }
                 rules={[
                   { required: true, message: '请输入 slug' },
                   {
-                    pattern: /^[a-z0-9-]+$/,
-                    message: '只能小写字母/数字/连字符',
+                    pattern: /^[a-z0-9\u4e00-\u9fff-]+$/,
+                    message: '只能小写字母/数字/中文/连字符',
                   },
                 ]}
               >
-                <Input placeholder="url-friendly-slug" />
+                <Input
+                  placeholder="url-friendly-slug"
+                  onChange={handleSlugChange}
+                />
               </Form.Item>
 
               <Form.Item name="tags" label={fieldLabel('标签')}>
@@ -233,14 +367,38 @@ export default function PostEditor({ post }: { post?: AdminPost }) {
                 />
               </Form.Item>
 
-              <Form.Item name="reading_time" label={fieldLabel('阅读时长(分)')}>
+              <Form.Item
+                name="reading_time"
+                label={fieldLabel('阅读时长(分)')}
+                extra={
+                  <span className="font-mono text-label-mono text-tertiary-fixed">
+                    留空则按字数自动计算
+                  </span>
+                }
+              >
                 <InputNumber
                   min={0}
                   max={300}
                   className="w-full"
-                  placeholder="自动计算可空"
+                  placeholder="自动计算"
                 />
               </Form.Item>
+            </div>
+
+            {/* 派生字段提示 */}
+            <div className="border border-outline-variant bg-surface-container-lowest/60 p-4 space-y-2">
+              <h4 className="font-mono text-label-mono text-on-surface-variant uppercase tracking-widest mb-2">
+                自动派生
+              </h4>
+              <div className="space-y-1.5">
+                <DeriveRow label="Slug" hint="从标题生成" />
+                <DeriveRow label="摘要" hint="从正文首段提取" />
+                <DeriveRow label="阅读时长" hint="按中英文字数估算" />
+                <DeriveRow label="目录" hint="从标题层级生成" />
+              </div>
+              <p className="font-mono text-label-mono text-tertiary-fixed mt-2">
+                未显式提供的字段将在保存时自动生成
+              </p>
             </div>
 
             {isEdit && post?.updated_at && (
@@ -251,9 +409,18 @@ export default function PostEditor({ post }: { post?: AdminPost }) {
           </div>
         </div>
 
-        {/* 提交触发：通过 form.submit() 触发，这里不需要按钮 */}
+        {/* 提交触发:通过 form.submit() 触发,这里不需要按钮 */}
         <button type="submit" className="hidden" aria-hidden />
       </Form>
+    </div>
+  );
+}
+
+function DeriveRow({ label, hint }: { label: string; hint: string }) {
+  return (
+    <div className="flex items-center justify-between font-mono text-label-mono">
+      <span className="text-on-surface-variant">{label}</span>
+      <span className="text-tertiary-fixed">{hint}</span>
     </div>
   );
 }

@@ -172,6 +172,14 @@ body {
   line-height: 1.7;
   color: var(--color-on-surface);
 }
+/* 标题滚动锚点偏移:点击 TOC 后 scrollIntoView 留出顶部固定导航栏空间
+   (Navbar 高度约 64px,留 80px 缓冲,避免标题被遮挡) */
+.article-content h1,
+.article-content h2,
+.article-content h3,
+.article-content h4 {
+  scroll-margin-top: 80px;
+}
 .article-content h1 {
   font-size: 32px;
   font-weight: 600;
@@ -185,8 +193,17 @@ body {
   line-height: 1.4;
   letter-spacing: -0.01em;
   margin: 2em 0 0.7em;
-  padding-bottom: 0.4em;
-  border-bottom: 1px solid var(--color-outline-variant);
+  /* 左侧装饰横线:用 background 画一段 tertiary-fixed 短线
+     不加自动序号,避免与文章自带序号(如"七、""一、")重复 */
+  padding-left: 3rem;
+  background-image: linear-gradient(
+    to right,
+    var(--color-tertiary-fixed),
+    var(--color-tertiary-fixed)
+  );
+  background-size: 2rem 1px;
+  background-position: 0 0.65em;
+  background-repeat: no-repeat;
 }
 .article-content h3 {
   font-size: 18px;
@@ -226,9 +243,67 @@ body {
   padding: 0;
   font-size: 13px;
 }
+/* highlight.js token 配色（与 atom-one-dark 主题协调，叠加在博客底色上） */
+.article-content .hljs {
+  background: transparent;
+  color: var(--color-on-surface);
+}
+.article-content .hljs-comment,
+.article-content .hljs-quote {
+  color: var(--color-outline);
+  font-style: italic;
+}
+.article-content .hljs-keyword,
+.article-content .hljs-selector-tag,
+.article-content .hljs-built_in,
+.article-content .hljs-name,
+.article-content .hljs-tag {
+  color: var(--color-primary);
+}
+.article-content .hljs-string,
+.article-content .hljs-title,
+.article-content .hljs-section,
+.article-content .hljs-attribute,
+.article-content .hljs-literal,
+.article-content .hljs-template-tag,
+.article-content .hljs-template-variable,
+.article-content .hljs-type,
+.article-content .hljs-addition {
+  color: var(--color-on-surface);
+}
+.article-content .hljs-number,
+.article-content .hljs-symbol,
+.article-content .hljs-bullet,
+.article-content .hljs-meta,
+.article-content .hljs-link,
+.article-content .hljs-deletion {
+  color: var(--color-on-surface-variant);
+}
+/* 标题锚链接 */
+.article-content .anchor-link {
+  display: inline-block;
+  margin-left: 0.4em;
+  opacity: 0;
+  color: var(--color-primary);
+  text-decoration: none;
+  font-size: 0.8em;
+  transition: opacity 0.15s ease;
+}
+.article-content h1:hover .anchor-link,
+.article-content h2:hover .anchor-link,
+.article-content h3:hover .anchor-link,
+.article-content h4:hover .anchor-link {
+  opacity: 1;
+}
+/* KaTeX 公式块居中 */
+.article-content .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 8px 0;
+}
 .article-content blockquote {
   background: transparent;
-  border-left: 2px solid var(--color-primary);
+  border-left: 2px solid var(--color-tertiary-fixed);
   padding: 4px 0 4px 16px;
   margin: 1.2em 0;
   color: var(--color-on-surface-variant);
@@ -241,22 +316,67 @@ body {
 }
 .article-content ul,
 .article-content ol {
-  padding-left: 1.5em;
-  margin: 1em 0;
+  margin: 1.5em 0;
 }
-.article-content ul li {
+/* 无序列表:绿色圆点 */
+.article-content ul {
   list-style: none;
-  position: relative;
-  padding-left: 1em;
+  padding-left: 1.5em;
 }
-.article-content ul li::before {
-  content: "—";
+.article-content ul > li {
+  position: relative;
+  padding-left: 0.5em;
+  margin-bottom: 0.8em;
+}
+.article-content ul > li::before {
+  content: "";
+  position: absolute;
+  left: -0.9em;
+  top: 0.7em;
+  width: 6px;
+  height: 6px;
+  background: var(--color-tertiary-fixed);
+  border-radius: 50%;
+}
+/* 空 li 不显示圆点:
+   - :empty 完全无子节点
+   - :has(p:only-child:empty) 仅含一个空段落
+   - :has(br:only-child) 仅含一个换行 */
+.article-content ul > li:empty::before,
+.article-content ul > li:has(p:only-child:empty)::before,
+.article-content ul > li:has(br:only-child)::before {
+  content: none;
+}
+/* 嵌套无序列表:用更小的半透明圆点 */
+.article-content ul ul > li::before {
+  background: color-mix(in srgb, var(--color-tertiary-fixed) 50%, transparent);
+  width: 5px;
+  height: 5px;
+}
+/* 有序列表:绿色边框数字标签(01/02/03)
+   参考 plan/文章详情.html 的学术报告风格,上下边距增大 */
+.article-content ol {
+  list-style: none;
+  padding-left: 0;
+  counter-reset: ol-counter;
+}
+.article-content ol > li {
+  position: relative;
+  padding-left: 3.5em;
+  margin-bottom: 1.5em;
+  counter-increment: ol-counter;
+}
+.article-content ol > li::before {
+  content: counter(ol-counter, decimal-leading-zero);
   position: absolute;
   left: 0;
-  color: var(--color-outline-variant);
-}
-.article-content ol li {
-  list-style: decimal;
+  top: 0.1em;
+  color: var(--color-tertiary-fixed);
+  border: 1px solid color-mix(in srgb, var(--color-tertiary-fixed) 30%, transparent);
+  padding: 0 0.5em;
+  font-family: var(--font-jetbrains);
+  font-size: 12px;
+  line-height: 1.5;
 }
 .article-content table {
   width: 100%;
@@ -285,7 +405,12 @@ body {
     font-size: 15px;
   }
   .article-content h1 { font-size: 26px; }
-  .article-content h2 { font-size: 21px; }
+  .article-content h2 {
+    font-size: 21px;
+    /* 移动端缩小横线 + 序号占位,避免标题换行过窄 */
+    padding-left: 2.4rem;
+    background-size: 1.5rem 1px;
+  }
 }
 
 /* ==========================================================================
@@ -334,4 +459,93 @@ body {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* ==========================================================================
+   Bytemd 编辑器 — 适配 Obsidian Spatial 主题
+   纯黑底 + 1px 描边 + JetBrains Mono 等宽字体
+   ========================================================================== */
+.bytemd-wrapper {
+  background: var(--color-surface);
+  border: 1px solid var(--color-outline-variant);
+}
+.bytemd-wrapper .bytemd {
+  background: var(--color-surface);
+  color: var(--color-on-surface);
+  border-color: var(--color-outline-variant);
+  font-family: var(--font-geist-sans);
+  height: 600px;
+}
+.bytemd-wrapper .bytemd-toolbar {
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-outline-variant);
+}
+.bytemd-wrapper .bytemd-toolbar-icon:hover {
+  background: var(--color-elevated);
+}
+.bytemd-wrapper .bytemd-toolbar-icon svg {
+  color: var(--color-on-surface-variant);
+}
+.bytemd-wrapper .bytemd-editor .CodeMirror {
+  background: var(--color-surface);
+  color: var(--color-on-surface);
+  font-family: var(--font-jetbrains);
+  font-size: 14px;
+}
+.bytemd-wrapper .bytemd-editor .CodeMirror-gutters {
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-outline-variant);
+}
+.bytemd-wrapper .bytemd-editor .CodeMirror-linenumber {
+  color: var(--color-outline);
+}
+.bytemd-wrapper .bytemd-editor .CodeMirror-cursor {
+  border-left-color: var(--color-primary);
+}
+.bytemd-wrapper .bytemd-editor .CodeMirror-selected {
+  background: rgba(255, 255, 255, 0.12);
+}
+.bytemd-wrapper .bytemd-preview {
+  background: var(--color-surface);
+  color: var(--color-on-surface);
+  padding: 24px 32px;
+}
+.bytemd-wrapper .bytemd-preview h1,
+.bytemd-wrapper .bytemd-preview h2,
+.bytemd-wrapper .bytemd-preview h3 {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-outline-variant);
+}
+.bytemd-wrapper .bytemd-preview a {
+  color: var(--color-primary);
+}
+.bytemd-wrapper .bytemd-preview code {
+  background: var(--color-elevated);
+  border: 1px solid var(--color-line);
+  font-family: var(--font-jetbrains);
+}
+.bytemd-wrapper .bytemd-preview pre {
+  background: var(--color-elevated);
+  border: 1px solid var(--color-line-strong);
+}
+.bytemd-wrapper .bytemd-preview pre code {
+  background: transparent;
+  border: 0;
+}
+.bytemd-wrapper .bytemd-preview blockquote {
+  border-left-color: var(--color-primary);
+  color: var(--color-on-surface-variant);
+}
+.bytemd-wrapper .bytemd-preview table th,
+.bytemd-wrapper .bytemd-preview table td {
+  border-color: var(--color-outline-variant);
+}
+.bytemd-wrapper .bytemd-preview table th {
+  background: var(--color-elevated);
+}
+.bytemd-wrapper .bytemd-split .bytemd-preview {
+  border-left: 1px solid var(--color-outline-variant);
+}
+.bytemd-wrapper .bytemd-fullscreen {
+  z-index: 1100;
 }

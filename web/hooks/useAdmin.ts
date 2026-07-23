@@ -26,6 +26,7 @@ import {
   personasApi,
   postsApi,
   settingsApi,
+  statsApi,
   type AdminChannel,
   type AdminInfo,
   type AdminPersona,
@@ -37,8 +38,10 @@ import {
   type PostCreatePayload,
   type PostListParams,
   type PostUpdatePayload,
+  type RecentQuestion,
   type SettingsUpdatePayload,
   type SiteSettings,
+  type StatsOverview,
 } from '@/lib/api/admin';
 import type { Paginated } from '@/lib/api';
 
@@ -54,6 +57,9 @@ export const adminKeys = {
     ['admin', 'personas', params] as const,
   persona: (id: string) => ['admin', 'persona', id] as const,
   settings: ['admin', 'settings'] as const,
+  statsOverview: ['admin', 'stats', 'overview'] as const,
+  statsRecentQuestions: (limit: number) =>
+    ['admin', 'stats', 'recent-questions', limit] as const,
 };
 
 // ===== Auth =====
@@ -189,6 +195,20 @@ export function useSetPostStatus(
   });
 }
 
+export function useUploadPostMd(
+  opts?: UseMutationOptions<AdminPost, Error, { file: File; channelId: string }>,
+) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ file, channelId }) => postsApi.uploadMd(file, channelId),
+    onSuccess: (...args) => {
+      qc.invalidateQueries({ queryKey: ['admin', 'posts'] });
+      opts?.onSuccess?.(...args);
+    },
+    ...opts,
+  });
+}
+
 // ===== Channels =====
 
 export function useAdminChannels(
@@ -313,6 +333,30 @@ export function useUpdateSettings(
       qc.setQueryData(adminKeys.settings, data);
       opts?.onSuccess?.(data, vars, ...rest);
     },
+    ...opts,
+  });
+}
+
+// ===== Stats（数据看板）=====
+
+export function useStatsOverview(opts?: UseQueryOptions<StatsOverview>) {
+  return useQuery({
+    queryKey: adminKeys.statsOverview,
+    queryFn: () => statsApi.overview(),
+    // 看板数据相对稳定，30s 内不重复请求
+    staleTime: 30_000,
+    ...opts,
+  });
+}
+
+export function useStatsRecentQuestions(
+  limit = 10,
+  opts?: UseQueryOptions<Paginated<RecentQuestion>>,
+) {
+  return useQuery({
+    queryKey: adminKeys.statsRecentQuestions(limit),
+    queryFn: () => statsApi.recentQuestions(limit),
+    staleTime: 30_000,
     ...opts,
   });
 }

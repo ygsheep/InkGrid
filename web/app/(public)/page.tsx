@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { ArrowRight, ArrowUpRight, Filter } from 'lucide-react';
 import AskBox from '@/components/chat/AskBox';
-import { fetchPosts } from '@/lib/api';
+import { fetchPosts, fetchChannels } from '@/lib/api';
 
 const author = process.env.NEXT_PUBLIC_SITE_AUTHOR || '博主';
 const siteName = process.env.NEXT_PUBLIC_SITE_NAME || 'inkgrid.dev';
@@ -14,7 +14,13 @@ function dateStamp(iso: string) {
 }
 
 export default async function HomePage() {
-  const { items } = await fetchPosts({ size: 30 });
+  const [postsData, channels] = await Promise.all([
+    fetchPosts({ size: 30 }),
+    fetchChannels().catch(() => []),
+  ]);
+  const { items } = postsData;
+  // 第一个频道作为"浏览全部文章"的入口(文章即知识库,按频道组织)
+  const primaryChannel = channels[0];
   // 最新发布取前 3 篇，其余作为历史存档
   const latestPosts = items.slice(0, 3);
   const archivePosts = items.slice(3);
@@ -40,13 +46,15 @@ export default async function HomePage() {
               <AskBox />
             </div>
             <div className="mt-6 flex flex-wrap gap-3">
-              <Link
-                href="/posts"
-                className="font-mono text-label-mono text-on-surface-variant hover:text-primary uppercase tracking-widest flex items-center gap-2 transition-colors"
-              >
-                浏览全部文章
-                <ArrowRight size={14} />
-              </Link>
+              {primaryChannel && (
+                <Link
+                  href={`/channel/${primaryChannel.slug}`}
+                  className="font-mono text-label-mono text-on-surface-variant hover:text-primary uppercase tracking-widest flex items-center gap-2 transition-colors"
+                >
+                  浏览全部文章
+                  <ArrowRight size={14} />
+                </Link>
+              )}
               <span className="text-outline-variant">·</span>
               <Link
                 href="/ask"
@@ -72,12 +80,14 @@ export default async function HomePage() {
                 前沿研究与实践架构更新
               </p>
             </div>
-            <Link
-              href="/posts"
-              className="font-mono text-label-mono text-on-surface-variant hover:text-primary uppercase tracking-widest hidden md:block"
-            >
-              查看全部 →
-            </Link>
+            {primaryChannel && (
+              <Link
+                href={`/channel/${primaryChannel.slug}`}
+                className="font-mono text-label-mono text-on-surface-variant hover:text-primary uppercase tracking-widest hidden md:block"
+              >
+                查看全部 →
+              </Link>
+            )}
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {latestPosts.map((p, i) => (

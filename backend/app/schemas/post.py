@@ -38,7 +38,7 @@ class Article(ArticleSummary):
 class PostCreate(BaseModel):
     """后台写文章入参。"""
 
-    slug: str
+    slug: str = ""
     title: str
     excerpt: str | None = None
     content_md: str

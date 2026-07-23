@@ -146,6 +146,37 @@ export const postsApi = {
   setStatus(id: string, status: string) {
     return unwrap<AdminPost>(request.post(`/admin/posts/${id}/status`, { status }));
   },
+  uploadMd(file: File, channelId: string) {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('channel_id', channelId);
+    // axios 检测到 FormData 会自动设置 multipart/form-data boundary
+    return unwrap<AdminPost>(
+      request.post('/admin/posts/upload', form, {
+        timeout: 30000, // 文件上传放宽超时
+      }),
+    );
+  },
+};
+
+// ===== Uploads =====
+
+export interface ImageUploadResult {
+  url: string;
+  size: number;
+  max_size: number;
+}
+
+export const uploadsApi = {
+  uploadImage(file: File) {
+    const form = new FormData();
+    form.append('file', file);
+    return unwrap<ImageUploadResult>(
+      request.post('/admin/uploads/image', form, {
+        timeout: 30000,
+      }),
+    );
+  },
 };
 
 // ===== Channels =====
@@ -249,5 +280,62 @@ export const settingsApi = {
   },
   update(payload: SettingsUpdatePayload) {
     return unwrap<SiteSettings>(request.patch('/admin/settings', payload));
+  },
+};
+
+// ===== Stats（数据看板）=====
+
+export interface StatsSummary {
+  postCount: number;
+  questionCount: number;
+  knowledgeDocCount: number;
+  monthlyViews: number;
+}
+
+export interface StatsTrend {
+  posts: number[];
+  questions: number[];
+}
+
+export interface TopArticle {
+  slug: string;
+  title: string;
+  channelName: string | null;
+  citationCount: number;
+}
+
+export interface TopQuestion {
+  content: string;
+  count: number;
+}
+
+export interface RecentQuestion {
+  sessionId: string;
+  title: string | null;
+  personaName: string | null;
+  scopeType: string;
+  scopeRef: string | null;
+  firstQuestion: string | null;
+  lastAnswerSnippet: string | null;
+  messageCount: number;
+  createdAt: string;
+}
+
+export interface StatsOverview {
+  summary: StatsSummary;
+  trend: StatsTrend;
+  topArticles: TopArticle[];
+  topQuestions: TopQuestion[];
+  recentQuestions: RecentQuestion[];
+}
+
+export const statsApi = {
+  overview() {
+    return unwrap<StatsOverview>(request.get('/admin/stats/overview'));
+  },
+  recentQuestions(limit = 10) {
+    return unwrap<Paginated<RecentQuestion>>(
+      request.get(`/admin/stats/recent-questions?limit=${limit}`),
+    );
   },
 };

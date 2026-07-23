@@ -6,10 +6,7 @@ import { usePathname } from 'next/navigation';
 import { Drawer } from 'antd';
 import { Menu, Search, MessageSquare, Mic, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
-
-interface NavbarProps {
-  channels?: { slug: string; name: string }[];
-}
+import { useChannels } from '@/hooks/useChannels';
 
 const actions = [
   { href: '/search', icon: Search, label: '搜索' },
@@ -22,18 +19,18 @@ const actions = [
  * TopNavBar — fixed, full-width, 1px outline-variant bottom border.
  * Edge-to-edge functional zone, zero-radius, mono labels.
  *
- * 频道列表由 (public)/layout.tsx 在 RSC 层拉取并传入；后端不可用时
- * channels 为空数组，仅渲染固定链接，避免出现指向不存在 slug 的死链。
+ * 频道列表通过 useChannels 在客户端拉取并 React Query 缓存(5min staleTime),
+ * (public) 和 (chat) 路由组共享同一缓存,保证导航在任何路由下一致。
  */
-export default function Navbar({ channels = [] }: NavbarProps) {
+export default function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
   const siteName = (process.env.NEXT_PUBLIC_SITE_NAME || 'inkgrid.dev').toUpperCase();
+  const { data: channels = [] } = useChannels();
 
   const navLinks = [
     { href: '/', label: '首页' },
-    { href: '/posts', label: '文章' },
     ...channels.map((c) => ({ href: `/channel/${c.slug}`, label: c.name })),
     { href: '/ask/persona', label: 'AI 角色' },
     { href: '/about', label: '关于' },

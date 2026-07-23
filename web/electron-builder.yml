@@ -1,0 +1,63 @@
+# electron-builder 打包配置
+# 文档: https://www.electron.build/configuration
+#
+# 打包流程:
+#  1. `next build` 产出 .next/
+#  2. electron-builder 把 web/ 目录(含 .next、electron、node_modules、package.json)打进 app
+#  3. 运行时 Electron 主进程 spawn `next start`,从 .next/ 启动 SSR 服务
+
+appId: dev.inkgrid.desktop
+productName: InkGrid
+copyright: Copyright © 2026
+
+directories:
+  output: release
+  buildResources: electron/build-resources
+
+# 打包进 app 的文件(其余文件不进 asar,减小体积)
+# 关键:.next(构建产物)、electron(主进程)、node_modules(运行时依赖)、package.json、public、.env.electron
+files:
+  - electron/**/*
+  - .next/**/*
+  - public/**/*
+  - .env.electron
+  - package.json
+  - next.config.js
+  - "!**/*.map"
+  - "!**/node_modules/*/{CHANGELOG.md,README.md,readme.md,readme}"
+  - "!**/node_modules/**/{test,tests,__tests__,docs,doc,examples,example}/**"
+  - "!**/node_modules/.cache"
+  - "!**/node_modules/typescript/**"
+  - "!**/node_modules/@types/**"
+
+# node_modules 必须完整打入(Next.js 运行时需要),不能 asar 解包
+# asar 默认开启,这里保持默认
+
+# Windows 打包配置
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+# NSIS 安装器配置
+nsis:
+  oneClick: false                    # 非一键安装,允许用户选目录
+  perMachine: false                  # 当前用户安装,无需管理员权限
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: InkGrid
+  installerIcon: electron/build-resources/icon.ico
+  uninstallerIcon: electron/build-resources/icon.ico
+  installerHeaderIcon: electron/build-resources/icon.ico
+
+# 打包后压缩
+compression: maximum
+
+# 发布配置(暂不启用,后续可对接 GitHub Release)
+# publish:
+#   provider: github
+#   owner: your-name
+#   repo: inkgrid

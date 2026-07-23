@@ -45,6 +45,17 @@ export const darkTheme: ThemeConfig = {
       primaryShadow: 'none',
       defaultShadow: 'none',
       dangerShadow: 'none',
+      // primary 按钮背景色为 #ffffff，darkAlgorithm 推导出的文字色偏浅，
+      // 显式指定为深色，保证白底深字对比清晰。
+      primaryColor: '#0a0a0a',
+      defaultBg: '#0a0a0a',
+      defaultColor: '#e3e2e2',
+      defaultBorderColor: '#444748',
+      defaultHoverColor: '#ffffff',
+      defaultHoverBg: '#1f2020',
+      defaultHoverBorderColor: '#8e9192',
+      defaultActiveColor: '#ffffff',
+      defaultActiveBg: '#1b1c1c',
     },
     Input: {
       colorBgContainer: '#0a0a0a',

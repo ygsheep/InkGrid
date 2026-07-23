@@ -45,12 +45,49 @@ class Settings(BaseSettings):
     next_revalidate_token: str = ""
     next_public_api_base: str = "http://localhost:3000"
 
+    # ===== CORS 额外 origin =====
+    # 局域网联调时填开发机 IP,如 "http://192.168.1.37:3000";多个用逗号分隔。
+    # 默认空,不影响现有 localhost 开发。
+    cors_extra_origins: str = ""
+
     # ===== 对象存储（MinIO） =====
     minio_endpoint: str = "localhost:9000"
     minio_access_key: str = "minio"
     minio_secret_key: str = "minio123"
     minio_bucket: str = "inkgrid"
     minio_secure: bool = False
+
+    # ===== LLM 网关（OpenAI 兼容） =====
+    # 开发期：LMStudio 本地服务 http://localhost:1234/v1，API Key 任意值
+    # 生产期：通义 https://dashscope.aliyuncs.com/compatible-mode/v1
+    #         DeepSeek https://api.deepseek.com/v1
+    llm_provider: str = "lmstudio"  # lmstudio | qwen | deepseek
+    llm_base_url: str = "http://localhost:1234/v1"
+    llm_api_key: str = "lm-studio"
+    llm_model: str = "qwen2.5-7b-instruct"
+    llm_temperature: float = 0.3
+    llm_max_tokens: int = 2048
+    llm_request_timeout: float = 60.0  # 流式首 token 超时阈值
+
+    # ===== Embedding（BGE-M3，Python 进程内加载） =====
+    embedding_model: str = "BAAI/bge-m3"
+    embedding_device: str = "cpu"  # cpu | cuda | mps
+    embedding_cache_dir: str = "./models"  # HuggingFace 模型缓存目录
+    embedding_batch_size: int = 16
+
+    # ===== Reranker（bge-reranker-v2-m3，Python 进程内加载） =====
+    reranker_model: str = "BAAI/bge-reranker-v2-m3"
+    reranker_device: str = "cpu"  # cpu | cuda | mps
+    reranker_cache_dir: str = "./models"
+    reranker_top_n: int = 5  # 精排后保留数量
+
+    # ===== Milvus 向量库 =====
+    milvus_host: str = "localhost"
+    milvus_port: int = 19530
+    milvus_collection: str = "inkgrid_chunks"
+    milvus_user: str = ""
+    milvus_password: str = ""
+    milvus_use_partition: bool = True  # 启用三级范围 partition 路由
 
 
 @lru_cache

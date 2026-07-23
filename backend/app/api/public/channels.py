@@ -1,9 +1,11 @@
-"""公开频道路由：GET /api/channels, /api/channels/:slug。"""
+"""公开频道路由：GET /api/channels, /api/channels/:slug, /api/channels/:slug/tags。"""
 from fastapi import APIRouter, Query
+from sqlalchemy import func, select, text
 
 from app.core.errors import NotFoundError
 from app.crud.channel import channel as channel_crud
 from app.deps import DBSession
+from app.models.post import Post
 from app.schemas.channel import Channel
 from app.schemas.common import Page, envelope
 
@@ -51,3 +53,32 @@ async def get_channel(db: DBSession, slug: str) -> dict:
     if not ch:
         raise NotFoundError("频道不存在")
     return envelope(_to_channel(ch).model_dump())
+
+
+@router.get("/channels/{slug}/tags")
+async def list_channel_tags(db: DBSession, slug: str) -> dict:
+    """频道下的标签列表及文章数。
+
+    使用 PostgreSQL unnest 展开 tags 数组,按 tag 分组计数。
+    仅统计该频道下已发布文章。
+    """
+    ch = await channel_crud.get_by_slug(db, slug)
+    if not ch:
+        raise NotFoundError("频道不存在")
+
+    stmt = (
+        select(
+            func.unnest(Post.tags).label("tag"),
+            func.count().label("count"),
+        )
+        .where(Post.status == "published", Post.channel_id == ch.id)
+        .group_by(text("tag"))
+        .order_by(text("count DESC"))
+    )
+    result = await db.execute(stmt)
+    items = [
+        {"tag": row.tag, "count": row.count}
+        for row in result
+        if row.tag
+    ]
+    return envelope({"items": items, "total": len(items)})

@@ -6,8 +6,10 @@
 
 流程：
 1. 用 Base.metadata.create_all 创建所有表（开发期简化，生产用 alembic upgrade head）
-2. 写入种子数据：默认频道、默认人设、站点设置单行
+2. 写入种子数据：默认人设、站点设置单行
 3. 幂等：已存在的数据跳过
+
+注：频道由用户在后台自行创建（文章即知识库，按知识域组织频道）。
 """
 import asyncio
 import sys
@@ -21,7 +23,6 @@ from sqlalchemy import select  # noqa: E402
 from app.core.logging import configure_logging, get_logger  # noqa: E402
 from app.db.session import async_session_factory, engine  # noqa: E402
 from app.models import Base  # noqa: E402
-from app.models.channel import Channel  # noqa: E402
 from app.models.persona import Persona  # noqa: E402
 from app.models.settings import SiteSettings  # noqa: E402
 
@@ -64,23 +65,6 @@ async def seed_data() -> None:
         else:
             persona_id = persona_exists.id
             logger.info("seed_persona_exists", persona_id=str(persona_id))
-
-        # 默认频道
-        channel_exists = (
-            await db.execute(select(Channel).where(Channel.slug == "blog"))
-        ).scalar_one_or_none()
-        if not channel_exists:
-            channel = Channel(
-                slug="blog",
-                name="博客",
-                description="技术博客文章",
-                accent="channel",
-                persona_id=persona_id,
-            )
-            db.add(channel)
-            logger.info("seed_channel_created", slug="blog")
-        else:
-            logger.info("seed_channel_exists", slug="blog")
 
         # 站点设置
         settings_exists = (

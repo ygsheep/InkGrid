@@ -131,12 +131,13 @@ class CRUDPost(CRUDBase[Post, PostCreate, PostUpdate]):
         db: AsyncSession,
         slug: str,
         *,
+        tag: str | None = None,
         offset: int = 0,
         limit: int = 20,
     ) -> tuple[list[Post], int]:
-        """按频道 slug 列出已发布文章。"""
+        """按频道 slug 列出已发布文章(可按标签筛选)。"""
         return await self.list_published(
-            db, channel=slug, offset=offset, limit=limit
+            db, channel=slug, tag=tag, offset=offset, limit=limit
         )
 
     async def set_status(

@@ -84,7 +84,10 @@ function getServerBase(): string {
 
 export async function serverFetch<T>(
   path: string,
-  init?: RequestInit & { revalidate?: number },
+  init?: RequestInit & {
+    revalidate?: number;
+    tags?: string[];
+  },
 ): Promise<T> {
   const base = getServerBase();
   // 如果是绝对 URL 直接用，否则拼接 base + path
@@ -92,10 +95,15 @@ export async function serverFetch<T>(
     ? path
     : `${base}${path.startsWith('/') ? path : `/${path}`}`;
 
-  const { revalidate, ...restInit } = init ?? {};
+  const { revalidate, tags, ...restInit } = init ?? {};
+  // next 选项：tags 优先（可被 revalidateTag 精准失效），其次 revalidate（时间缓存）
+  const next: Record<string, unknown> = {};
+  if (tags?.length) next.tags = tags;
+  if (revalidate !== undefined) next.revalidate = revalidate;
+
   const res = await fetch(url, {
     ...restInit,
-    next: revalidate !== undefined ? { revalidate } : undefined,
+    next: Object.keys(next).length ? next : undefined,
   });
   if (!res.ok) {
     throw new Error(`API ${res.status}: ${url}`);
