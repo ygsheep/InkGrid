@@ -5,33 +5,25 @@
 
 帧协议（JSON 文本帧）见 schemas/ws.py 与 plan/后端设计方案.md §5.4。
 
-P0 阶段使用 mock LLM：固定回复 + 模拟 token 流。
-真实 RAG/LLM 接入在 P1+。
+P1 阶段接入 RAG pipeline（PydanticAI + Milvus + BGE-M3 + reranker）。
 """
 import asyncio
 import json
 from uuid import UUID
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from sqlalchemy import select
 
 from app.core.logging import get_logger, new_request_id
 from app.core.rate_limit import check_chat_anon, check_chat_ip
 from app.crud.chat import chat_message, chat_session
 from app.db.session import async_session_factory
+from app.models.persona import Persona
 from app.schemas import ws as ws_constants
+from app.services.rag.pipeline import run_rag_pipeline
 
 router = APIRouter()
 logger = get_logger("ws.chat")
-
-
-# ===== Mock LLM =====
-
-_MOCK_REPLY_TEMPLATE = (
-    "（这是 P0 阶段的 mock 回答）\n\n"
-    "你问的是：「{question}」\n\n"
-    "当前后端尚未接入 RAG 与 LLM，待 P1 阶段接入后会基于文章知识库作答。"
-)
-_MOCK_FOLLOWUPS = ["什么是 InkGrid？", "文章如何发布？", "频道和人设的区别？"]
 
 
 async def _send_rate(websocket: WebSocket, remaining: int) -> None:
@@ -81,7 +73,7 @@ async def chat_endpoint(
         )
         return
 
-    # 加载会话
+    # 加载会话 + persona
     async with async_session_factory() as db:
         sess = await chat_session.get(db, session_id)
         if not sess:
@@ -97,7 +89,19 @@ async def chat_endpoint(
         if not anon_id:
             anon_id = sess.anon_id
 
-    # 提取 IP（WS 用 client.host）
+        # 加载 persona（如果有）
+        persona_name = ""
+        persona_prompt = ""
+        if sess.persona_id:
+            persona = await db.get(Persona, sess.persona_id)
+            if persona:
+                persona_name = persona.name or ""
+                persona_prompt = persona.system_prompt or ""
+
+        scope_type = sess.scope_type or "global"
+        scope_ref = sess.scope_ref or ""
+
+    # 提取 IP
     client_ip = (
         websocket.client.host if websocket.client else "0.0.0.0"
     )
@@ -107,6 +111,7 @@ async def chat_endpoint(
         session_id=str(session_id),
         anon_id=anon_id,
         ip=client_ip,
+        scope=f"{scope_type}:{scope_ref}",
     )
 
     # 生成取消事件（用于 stop 帧中断流式输出）
@@ -163,7 +168,6 @@ async def chat_endpoint(
                 if anon_id:
                     await check_chat_anon(anon_id)
             except Exception as e:
-                # RateLimitError 或其他
                 from app.core.errors import RateLimitError
 
                 if isinstance(e, RateLimitError):
@@ -195,33 +199,28 @@ async def chat_endpoint(
                 )
                 await db.commit()
 
-            # 流式输出 mock 回复
-            try:
-                reply = await _stream_mock_reply_with_cancel(
-                    websocket, content, cancel_event
-                )
-            except asyncio.CancelledError:
-                reply = "（已中断）"
+            # 流式输出 RAG 回复
+            answer, citations, followups = await _stream_rag_reply(
+                websocket,
+                content,
+                scope_type,
+                scope_ref,
+                persona_name,
+                persona_prompt,
+                cancel_event,
+            )
 
-            # 发送推荐追问
-            await websocket.send_json({
-                "type": ws_constants.FOLLOWUP,
-                "questions": _MOCK_FOLLOWUPS,
-            })
-
-            # 持久化 assistant 消息
+            # 持久化 assistant 消息（含 citations/followups）
             async with async_session_factory() as db:
                 await chat_message.add(
                     db,
                     session_id=session_id,
                     role="assistant",
-                    content=reply,
-                    follow_ups=_MOCK_FOLLOWUPS,
+                    content=answer,
+                    citations=citations or None,
+                    follow_ups=followups or None,
                 )
                 await db.commit()
-
-            # 发送 done
-            await websocket.send_json({"type": ws_constants.DONE})
 
     except WebSocketDisconnect:
         logger.info("ws_disconnected", session_id=str(session_id))
@@ -235,17 +234,60 @@ async def chat_endpoint(
             pass
 
 
-async def _stream_mock_reply_with_cancel(
-    websocket: WebSocket, question: str, cancel_event: asyncio.Event
-) -> str:
-    """带取消支持的 mock 流式输出。"""
-    reply = _MOCK_REPLY_TEMPLATE.format(question=question)
-    chunks = [reply[i : i + 2] for i in range(0, len(reply), 2)]
-    sent = []
-    for chunk in chunks:
-        if cancel_event.is_set():
-            break
-        await websocket.send_json({"type": ws_constants.TOKEN, "content": chunk})
-        sent.append(chunk)
-        await asyncio.sleep(0.05)
-    return "".join(sent) if sent else reply
+async def _stream_rag_reply(
+    websocket: WebSocket,
+    question: str,
+    scope_type: str,
+    scope_ref: str,
+    persona_name: str,
+    persona_prompt: str,
+    cancel_event: asyncio.Event,
+) -> tuple[str, list[dict], list[str]]:
+    """带取消支持的 RAG 流式输出。
+
+    遍历 run_rag_pipeline generator，发送帧，收集 answer/citations/followups。
+    cancel_event 被 set 时中断（用户 stop 帧）。
+
+    Returns:
+        (answer, citations, followups)
+    """
+    answer_parts: list[str] = []
+    citations: list[dict] = []
+    followups: list[str] = []
+
+    try:
+        async for frame in run_rag_pipeline(
+            query=question,
+            scope_type=scope_type,
+            scope_ref=scope_ref,
+            persona_name=persona_name,
+            persona_system_prompt=persona_prompt,
+        ):
+            # 检查取消
+            if cancel_event.is_set():
+                logger.info("stream_cancelled", query=question[:50])
+                break
+
+            await websocket.send_json(frame)
+
+            # 收集结果用于持久化
+            ftype = frame.get("type")
+            if ftype == ws_constants.TOKEN:
+                answer_parts.append(frame.get("content", ""))
+            elif ftype == ws_constants.CITATION:
+                citations = frame.get("data", [])
+            elif ftype == ws_constants.FOLLOWUP:
+                followups = frame.get("questions", [])
+
+    except asyncio.CancelledError:
+        logger.info("stream_task_cancelled", query=question[:50])
+    except Exception as e:
+        logger.exception("stream_error", query=question[:50], error=str(e))
+        # 降级：发送错误提示
+        await websocket.send_json({
+            "type": ws_constants.ERROR,
+            "code": ws_constants.ERR_INTERNAL,
+            "message": "回答生成失败",
+        })
+
+    return "".join(answer_parts), citations, followups

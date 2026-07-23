@@ -26,6 +26,22 @@ async def lifespan(_: FastAPI):
     """应用生命周期。"""
     configure_logging(debug=settings.debug)
     logger.info("startup", app=settings.app_name, debug=settings.debug)
+    # 初始化 Milvus collection + global partition（幂等）
+    # 必须在入库前完成，否则首次发布文章时写入失败被吞，PG 有 chunks 但无向量
+    from app.db.milvus import milvus_store
+
+    try:
+        await milvus_store.init_collection()
+    except Exception as e:
+        logger.warning("milvus_init_failed", error=str(e))
+
+    # 初始化 Meilisearch posts 索引（幂等，失败不阻断启动）
+    from app.db.meili import meili_store
+
+    try:
+        await meili_store.init_index()
+    except Exception as e:
+        logger.warning("meili_init_failed", error=str(e))
     yield
     logger.info("shutdown")
     await close_redis()

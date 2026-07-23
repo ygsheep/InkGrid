@@ -39,7 +39,8 @@ backend/
 │   └── utils/            # 通用工具
 ├── alembic/              # 数据库迁移
 ├── tests/                # 测试（镜像 app 结构）
-├── scripts/              # 运维脚本
+├── scripts/              # 运维脚本（init_db / create_admin / download_models / convert_bge_m3 / smoke_rag 等）
+├── models/               # 预下载的 HuggingFace 模型（bge-m3 / bge-reranker-v2-m3，挂载给 TEI）
 ├── docker/               # Dockerfile + compose
 ├── alembic.ini
 ├── pyproject.toml
@@ -48,7 +49,9 @@ backend/
 
 ## 快速开始
 
-> 要求 Python ≥ 3.11（推荐 3.12+）。开发期用精简 dev 栈，不含 Milvus / Meilisearch（P2 接入 RAG 时再起全套）。
+> 要求 **Python ≥ 3.11**（推荐 3.12+；3.14 已验证可用）。
+> P0 阶段只需核心依赖 + 精简 dev 栈（Postgres/Redis/MinIO）。
+> P1+ 接入 RAG 需加装 `[rag]` extras + 下载 BGE 模型 + 启动 Milvus / TEI 服务。
 
 ### 1. 安装依赖
 
@@ -57,18 +60,34 @@ cd backend
 python -m venv .venv
 .venv\Scripts\activate          # Windows
 # source .venv/bin/activate     # macOS/Linux
-pip install -e ".[dev]"          # P0 核心依赖
-# pip install -e ".[dev,rag]"    # P2+ 接入 RAG 时加装向量库/Embedding 等
+
+# P0 核心依赖（FastAPI / ORM / Celery / 鉴权 等）
+pip install -e ".[dev]"
 ```
+
+#### P1+ RAG 依赖（含 torch / pydantic-ai / pymilvus 等）
+
+进程内 Embedding/Reranker 需要 torch。Windows / CPU 环境强烈建议用 PyTorch CPU index 安装，避免拉取 CUDA 轮子（省约 2GB 下载）：
+
+```bash
+# CPU 版 torch（推荐，国内镜像加速）
+pip install -e ".[dev,rag]" \
+  --index-url https://download.pytorch.org/whl/cpu \
+  --extra-index-url https://pypi.org/simple
+
+# 或 TEI 服务模式（不装 torch，Embedding/Reranker 走 HTTP 调 TEI 容器）
+pip install -e ".[dev,rag]" --extra-index-url https://pypi.org/simple
+```
+
+> 注意：extras 名是 `rag`（无点前缀）。正确写法 `".[rag]"`，不是 `".[.rag]"`。
 
 ### 2. 启动基础设施（Docker 精简 dev 栈）
 
 ```bash
-docker compose -f docker/docker-compose.dev.yml up -d
+# P0 精简栈：Postgres + Redis + MinIO（+ 自动初始化 bucket）
+docker compose -f docker/docker-compose.dev.yml up -d postgres redis minio
 docker compose -f docker/docker-compose.dev.yml ps     # 确认 healthy
 ```
-
-启动 Postgres + Redis + MinIO，并自动初始化 `inkgrid` bucket 为公开读。
 
 ### 3. 配置环境变量
 
@@ -115,10 +134,56 @@ curl http://127.0.0.1:8000/health
 # 浏览器打开 http://127.0.0.1:8000/docs
 ```
 
-### 7. 一键启动全栈（含 Milvus / Meilisearch，P2+ 用）
+### 7. 一键启动全栈（含 Milvus / TEI，P1+ 用）
 
 ```bash
-docker compose -f docker/docker-compose.yml up -d
+# 全栈：Postgres + Redis + MinIO + Milvus + etcd + TEI Embedding + TEI Reranker
+docker compose -f docker/docker-compose.dev.yml up -d
+```
+
+#### RAG 模型下载（首次部署必做）
+
+TEI 容器通过挂载 `backend/models/` 离线加载模型，需预先下载到该目录。脚本内置 hf-mirror 加速，支持断点续传、文件过滤（跳过 README/图片等冗余）和下载后校验。
+
+模型文件不进 git（`.gitignore` 已排除 `models/bge-m3/` 和 `models/bge-reranker-v2-m3/`），新成员 clone 后跑一次即可。
+
+```bash
+cd backend
+
+# 下载全部模型（bge-m3 ~4.3GB + bge-reranker-v2-m3 ~2.1GB，共约 6.4GB）
+python scripts/download_models.py
+
+# 仅查看下载状态（不下载）
+python scripts/download_models.py --list
+
+# 跳过 ONNX 文件（仅用 safetensors 时，省约 1.5GB）
+python scripts/download_models.py --no-onnx
+```
+
+脚本特性：
+- **hf-mirror 加速**：国内无需代理，下载速度约 5-10MB/s
+- **断点续传**：中断后重跑自动续传，不重复下已完成的文件
+- **文件过滤**：只下载权重 + tokenizer + config，跳过 README/图片等冗余
+- **下载后校验**：自动检查 `*.safetensors` 和 `tokenizer.json` 是否存在
+- **幂等跳过**：已完整下载的模型自动跳过，不重复下载
+
+> 如果 bge-m3 下载到的是 `pytorch_model.bin` 而非 `model.safetensors`（TEI 1.5+ 只认 safetensors），需额外转换：`python scripts/convert_bge_m3.py`（需要 torch）。
+
+#### Embedding / Reranker 双模式
+
+| 模式 | 触发条件 | 说明 |
+|------|---------|------|
+| TEI 服务（推荐生产）| `.env` 配了 `EMBEDDING_TEI_URL` / `RERANKER_TEI_URL` | 走 HTTP 调 TEI 容器，无需本地 torch |
+| 进程内推理（仅开发）| 上述 URL 留空 | sentence-transformers 加载本地模型，首次下载约 1.2GB |
+
+TEI 容器启动后，`.env` 中保持 `EMBEDDING_TEI_URL=http://localhost:8080` 和 `RERANKER_TEI_URL=http://localhost:8081` 即可。
+
+#### RAG 端到端冒烟测试
+
+```bash
+cd backend
+python scripts/smoke_rag.py
+# 验证：Milvus 连接 → TEI embedding → 入库 → 稠密检索 → TEI rerank
 ```
 
 ### 服务端口
@@ -131,7 +196,8 @@ docker compose -f docker/docker-compose.yml up -d
 | MinIO S3 API | 9000 | 对象存储 |
 | MinIO Console | 9001 | 浏览器管理（账号 `minio` / 密码 `minio123`）|
 | Milvus | 19530 | 向量库（仅全栈）|
-| Meilisearch | 7700 | 全文搜索（仅全栈）|
+| TEI Embedding | 8080 | BGE-M3 稠密向量服务（仅全栈）|
+| TEI Reranker | 8081 | bge-reranker-v2-m3 精排服务（仅全栈）|
 
 ### 停止与清理
 

@@ -1,11 +1,13 @@
-# 本地开发精简栈：Postgres + Redis + MinIO
-# P0/P1 阶段用，不含 Milvus / Meilisearch（P2+ 接入 RAG 时再起全套）
+# 本地开发精简栈：Postgres + Redis + MinIO + Milvus + Meilisearch
+# P0 阶段只需 postgres/redis/minio；P1 RAG 接入后需额外启动 milvus+etcd
+# P3 搜索接入后需额外启动 meilisearch
 #
 # 用法：
 #   cd backend
-#   docker compose -f docker/docker-compose.dev.yml up -d
-#   docker compose -f docker/docker-compose.dev.yml down        # 停止
-#   docker compose -f docker/docker-compose.dev.yml down -v    # 停止并删除数据
+#   docker compose -f docker/docker-compose.dev.yml up -d                    # 全栈
+#   docker compose -f docker/docker-compose.dev.yml up -d postgres redis minio  # 仅 P0
+#   docker compose -f docker/docker-compose.dev.yml down                     # 停止
+#   docker compose -f docker/docker-compose.dev.yml down -v                  # 停止并删除数据
 name: inkgrid-dev
 
 services:
@@ -82,7 +84,122 @@ services:
       echo '✓ bucket [inkgrid] created and set to public-read'
       "
 
+  # ===== TEI Embedding 服务（BGE-M3 稠密向量） =====
+  # P1 RAG 接入后需要。进程内模式替代方案，避免本地装 torch。
+  # 首次启动会从 HuggingFace 拉取 BAAI/bge-m3 模型（约 2GB），建议配 HF_ENDPOINT 镜像加速。
+  tei-embedding:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.5
+    container_name: inkgrid-tei-embedding
+    restart: unless-stopped
+    # 直接挂载本地模型目录作为 --model-id 路径，避免 TEI 走网络下载
+    # bge-m3 含 onnx/ 子目录，TEI 1.5 走 onnx 后端
+    command: ["--model-id", "/data/bge-m3", "--port", "80"]
+    environment:
+      HUGGINGFACE_HUB_OFFLINE: "1"
+    ports:
+      - "8080:80"
+    volumes:
+      - ../models:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ===== TEI Reranker 服务（bge-reranker-v2-m3 精排） =====
+  tei-reranker:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
+    container_name: inkgrid-tei-reranker
+    restart: unless-stopped
+    # candle 后端加载 safetensors；限制 workers 和 batch 防 OOM (137)
+    command: ["--model-id", "/data/bge-reranker-v2-m3", "--port", "80", "--tokenization-workers", "1", "--max-concurrent-requests", "16", "--max-batch-tokens", "2048"]
+    environment:
+      HUGGINGFACE_HUB_OFFLINE: "1"
+    ports:
+      - "8081:80"
+    volumes:
+      - ../models:/data
+    mem_limit: 4g
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+
+  # ===== etcd（Milvus 元数据存储） =====
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    container_name: inkgrid-etcd
+    restart: unless-stopped
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    volumes:
+      - etcddata:/etcd
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # ===== Milvus 2.4 向量库 =====
+  # P1 RAG 接入后需要。P0 阶段可不启动。
+  milvus:
+    image: milvusdb/milvus:v2.4.4
+    container_name: inkgrid-milvus
+    restart: unless-stopped
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      MINIO_ACCESS_KEY_ID: minio
+      MINIO_SECRET_ACCESS_KEY: minio123
+      MINIO_USE_SSL: "false"
+    ports:
+      - "19530:19530"  # gRPC
+      - "9091:9091"    # metrics
+    depends_on:
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    volumes:
+      - milvusdata:/var/lib/milvus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # ===== Meilisearch 全文搜索 =====
+  # P3 搜索接入后需要。仅索引 published 文章，供前端即时搜索。
+  # 开发环境 MEILI_ENV=development 不设 master key，开箱即用；
+  # 生产必须设 MEILI_MASTER_KEY 并在后端 .env 配 MEILI_KEY。
+  meilisearch:
+    image: getmeili/meilisearch:v1.6
+    container_name: inkgrid-meilisearch
+    restart: unless-stopped
+    environment:
+      MEILI_ENV: development
+    ports:
+      - "7700:7700"
+    volumes:
+      - meilidata:/meili_data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:7700/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
 volumes:
   pgdata:
   redisdata:
   miniodata:
+  etcddata:
+  milvusdata:
+  meilidata:

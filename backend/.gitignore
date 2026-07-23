@@ -65,3 +65,7 @@ alembic/versions/*.bak
 
 # Docker
 docker/data/
+
+# 模型文件（大文件，不进 git；用 scripts/download_models.py 下载）
+# bge-m3 ~4.3GB, bge-reranker-v2-m3 ~2.1GB
+models/

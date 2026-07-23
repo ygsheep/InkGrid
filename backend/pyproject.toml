@@ -38,21 +38,27 @@ dependencies = [
 
     # 对象存储（图片上传）
     "minio>=7.2",
+
+    # 全文搜索（P3：文章即时搜索）
+    "meilisearch>=0.31",
 ]
 
 [project.optional-dependencies]
-# P1+ RAG 管道相关：向量库 / Embedding / Reranker / 全文搜索 / LLM / 对象存储 / 文档解析
+# P1+ RAG 管道相关：向量库 / Embedding / Reranker / LLM / 文档解析
+# 进程内 embedding/reranker 需要 torch（CPU 版安装命令）：
+#   pip install -e ".[rag]" --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple
+# TEI 服务模式不需要 torch，可省略 --index-url
 rag = [
     "pymilvus>=2.4",
     "sentence-transformers>=3.0",
     "FlagEmbedding>=1.2",
-    "meilisearch>=0.31",
     "openai>=1.30",
-    "unstructured>=0.14",
-    "pypdf>=4.3",
     "python-slugify>=8.0",
-    "parsel>=1.9",
-    "dayjs>=1.1",
+    "pydantic-ai>=2.0",
+    "markdown-it-py>=3.0",
+    # torch 为 sentence-transformers / FlagEmbedding 进程内推理所需
+    # 这里仅声明，安装时建议用 CPU index 加速下载（见上方注释）
+    "torch>=2.2",
 ]
 
 dev = [

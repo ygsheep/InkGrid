@@ -1,12 +1,13 @@
 'use client';
 
 import { useState } from 'react';
-import { App, Button, Form, Input, Modal, Select, Space, Table, Tag, Tooltip } from 'antd';
+import { App, Button, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { Edit3, Plus } from 'lucide-react';
+import { Edit3, Plus, Trash2 } from 'lucide-react';
 import {
   useAdminPersonas,
   useCreatePersona,
+  useDeletePersona,
   useUpdatePersona,
 } from '@/hooks/useAdmin';
 import type {
@@ -64,6 +65,11 @@ export default function AdminPersonaPage() {
       setEditing({ open: false });
       form.resetFields();
     },
+    onError: (e) => message.error(e.message),
+  });
+
+  const deletePersona = useDeletePersona({
+    onSuccess: () => message.success('已删除'),
     onError: (e) => message.error(e.message),
   });
 
@@ -177,14 +183,33 @@ export default function AdminPersonaPage() {
       key: 'actions',
       width: 100,
       render: (_, r) => (
-        <Tooltip title="编辑">
-          <Button
-            type="text"
-            size="small"
-            icon={<Edit3 size={14} />}
-            onClick={() => openEdit(r)}
-          />
-        </Tooltip>
+        <Space size={0}>
+          <Tooltip title="编辑">
+            <Button
+              type="text"
+              size="small"
+              icon={<Edit3 size={14} />}
+              onClick={() => openEdit(r)}
+            />
+          </Tooltip>
+          <Tooltip title="删除">
+            <Popconfirm
+              title="删除人设"
+              description="关联频道的 persona 将被置空，确定删除？"
+              okText="删除"
+              cancelText="取消"
+              onConfirm={() => deletePersona.mutate(r.id)}
+            >
+              <Button
+                type="text"
+                size="small"
+                danger
+                icon={<Trash2 size={14} />}
+                loading={deletePersona.isPending}
+              />
+            </Popconfirm>
+          </Tooltip>
+        </Space>
       ),
     },
   ];

@@ -73,6 +73,7 @@ body {
    ========================================================================== */
 .spatial-grid {
   position: relative;
+  isolation: isolate;
   background-color: var(--color-base);
   background-image:
     /* Minor subdivisions (8px, white 3%) */
@@ -102,12 +103,12 @@ body {
 
 .spatial-grid > * {
   position: relative;
-  z-index: 1;
 }
 
 /* Legacy alias kept for any older references */
 .grid-bg {
   position: relative;
+  isolation: isolate;
   background-color: var(--color-base);
   background-image:
     linear-gradient(to right, var(--color-grid-major) 1px, transparent 1px),
@@ -124,7 +125,6 @@ body {
 }
 .grid-bg > * {
   position: relative;
-  z-index: 1;
 }
 
 /* ==========================================================================
@@ -549,3 +549,12 @@ body {
 .bytemd-wrapper .bytemd-fullscreen {
   z-index: 1100;
 }
+
+/* Meilisearch 搜索结果高亮（<mark> 标签由后端 _formatted 返回） */
+mark {
+  background: var(--color-primary);
+  color: var(--color-black);
+  padding: 0 2px;
+  border-radius: 1px;
+}
+

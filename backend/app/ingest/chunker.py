@@ -36,14 +36,15 @@ def _estimate_tokens(text: str) -> int:
 def chunk_document(parsed: ParsedDoc, tags: list[str] | None = None) -> list[ChunkResult]:
     """按标题边界 + 滑窗分块。
 
-    - 先按 ## / ### 标题切大段
+    - 先按 ## / ### 标题切大段（position 是字符偏移量）
     - 段落 > TARGET_CHARS 用滑窗再切
+    - 跳过纯标题行/空行碎片（strip 后无实质内容）
     - 保留 heading 元信息写入 metadata
     """
     text = parsed.text
     headings = parsed.headings
 
-    # 按标题位置切段
+    # 按标题位置切段（position 是字符偏移量）
     sections: list[tuple[str, str]] = []  # (heading_text, section_text)
     if not headings:
         sections.append(("", text))
@@ -64,7 +65,8 @@ def chunk_document(parsed: ParsedDoc, tags: list[str] | None = None) -> list[Chu
     seq = 0
     for heading, section in sections:
         section = section.strip()
-        if not section:
+        # 跳过纯标题行/空行碎片：strip 后只剩标题行本身（# 开头）或为空
+        if not section or section.lstrip("#").strip() == "":
             continue
 
         if len(section) <= TARGET_CHARS:

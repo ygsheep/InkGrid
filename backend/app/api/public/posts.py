@@ -4,6 +4,7 @@ from fastapi import APIRouter, Query
 from app.core.errors import NotFoundError
 from app.crud.post import post as post_crud
 from app.deps import DBSession
+from app.models.post_view import PostView
 from app.schemas.common import Page, envelope
 from app.schemas.post import Article, ArticleSummary
 
@@ -66,10 +67,16 @@ async def list_posts(
 
 @router.get("/posts/{slug}")
 async def get_post(db: DBSession, slug: str) -> dict:
-    """文章详情。"""
+    """文章详情。同时记录一条访问日志（失败不影响响应）。"""
     p = await post_crud.get_by_slug(db, slug, only_published=True)
     if not p:
         raise NotFoundError("文章不存在")
+    # 异步记录访问（不阻塞响应，失败静默）
+    try:
+        db.add(PostView(post_id=p.id))
+        await db.commit()
+    except Exception:
+        await db.rollback()
     return envelope(_to_article(p).model_dump())
 
 

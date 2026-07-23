@@ -263,6 +263,9 @@ export const personasApi = {
   update(id: string, payload: PersonaUpdatePayload) {
     return unwrap<AdminPersona>(request.patch(`/admin/personas/${id}`, payload));
   },
+  remove(id: string) {
+    return unwrap<{ ok: boolean }>(request.delete(`/admin/personas/${id}`));
+  },
 };
 
 // ===== Settings =====

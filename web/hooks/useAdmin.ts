@@ -313,6 +313,20 @@ export function useUpdatePersona(
   });
 }
 
+export function useDeletePersona(
+  opts?: UseMutationOptions<{ ok: boolean }, Error, string>,
+) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => personasApi.remove(id),
+    onSuccess: (...args) => {
+      qc.invalidateQueries({ queryKey: ['admin', 'personas'] });
+      opts?.onSuccess?.(...args);
+    },
+    ...opts,
+  });
+}
+
 // ===== Settings =====
 
 export function useAdminSettings(opts?: UseQueryOptions<SiteSettings>) {

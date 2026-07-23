@@ -2,18 +2,23 @@
 
 聚合接口单次返回看板所需的全部数据，避免前端发 N 次请求。
 数据源：posts / chat_messages / chat_sessions / knowledge_docs / personas。
+overview 端点用 Redis 缓存 5 分钟，减少重复聚合查询开销。
 """
+import json
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Query
 from sqlalchemy import func, select, text
 
+from app.core.logging import get_logger
+from app.db.redis import redis
 from app.deps import AdminId, DBSession
 from app.models.chat import ChatMessage, ChatSession
 from app.models.knowledge import KnowledgeDoc
 from app.models.persona import Persona
 from app.models.post import Post
+from app.models.post_view import PostView
 from app.models.channel import Channel
 from app.schemas.common import Page, envelope
 from app.schemas.stats import (
@@ -27,6 +32,11 @@ from app.schemas.stats import (
 )
 
 router = APIRouter(prefix="/stats")
+logger = get_logger("api.stats")
+
+# overview 缓存 key + TTL
+_OVERVIEW_CACHE_KEY = "stats:overview"
+_OVERVIEW_CACHE_TTL = 300  # 5 分钟
 
 
 def _now() -> datetime:
@@ -49,19 +59,16 @@ async def _fetch_summary(db) -> StatsSummary:
     )
     # 知识库文档数（全部 status）
     doc_count = await db.scalar(select(func.count(KnowledgeDoc.id)))
-    # 本月访问：P0 估算 = 本月新增 chat_sessions + 本月新发 posts
+    # 本月访问：从 post_views 表精确统计（替代原 chat_sessions+posts 估算）
     month_start = _now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    new_sessions = await db.scalar(
-        select(func.count(ChatSession.id)).where(ChatSession.created_at >= month_start)
-    )
-    new_posts = await db.scalar(
-        select(func.count(Post.id)).where(Post.published_at >= month_start)
+    monthly_views = await db.scalar(
+        select(func.count(PostView.id)).where(PostView.created_at >= month_start)
     )
     return StatsSummary(
         postCount=post_count or 0,
         questionCount=question_count or 0,
         knowledgeDocCount=doc_count or 0,
-        monthlyViews=(new_sessions or 0) + (new_posts or 0),
+        monthlyViews=monthly_views or 0,
     )
 
 
@@ -219,8 +226,18 @@ async def get_overview(db: DBSession, _: AdminId) -> dict:
     """看板聚合：单次返回看板所需全部数据。
 
     一次 DB 会话并行 5 个聚合查询，目标 P95 < 200ms。
-    Redis 缓存后续 P3 加（先保证功能可用）。
+    Redis 缓存 5 分钟，减少重复聚合查询开销；缓存失败不阻断响应。
     """
+    # 先查 Redis 缓存
+    try:
+        cached = await redis.get(_OVERVIEW_CACHE_KEY)
+        if cached:
+            logger.info("stats_overview_cache_hit")
+            return json.loads(cached)
+    except Exception as e:
+        logger.warning("stats_cache_read_failed", error=str(e))
+
+    # 缓存未命中，查 DB 聚合
     summary = await _fetch_summary(db)
     trend = await _fetch_trend(db)
     top_articles = await _fetch_top_articles(db)
@@ -233,7 +250,20 @@ async def get_overview(db: DBSession, _: AdminId) -> dict:
         topQuestions=top_questions,
         recentQuestions=recent,
     )
-    return envelope(data.model_dump())
+    resp = envelope(data.model_dump(mode="json"))
+
+    # 写入 Redis 缓存（失败不阻断）
+    try:
+        await redis.set(
+            _OVERVIEW_CACHE_KEY,
+            json.dumps(resp, default=str),
+            ex=_OVERVIEW_CACHE_TTL,
+        )
+        logger.info("stats_overview_cache_set", ttl=_OVERVIEW_CACHE_TTL)
+    except Exception as e:
+        logger.warning("stats_cache_write_failed", error=str(e))
+
+    return resp
 
 
 @router.get("/questions")

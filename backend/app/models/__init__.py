@@ -6,6 +6,7 @@ from app.models.base import Base
 from app.models.knowledge import Chunk, KnowledgeDoc
 from app.models.persona import Persona
 from app.models.post import Post
+from app.models.post_view import PostView
 from app.models.settings import SiteSettings
 
 __all__ = [
@@ -19,5 +20,6 @@ __all__ = [
     "KnowledgeDoc",
     "Persona",
     "Post",
+    "PostView",
     "SiteSettings",
 ]

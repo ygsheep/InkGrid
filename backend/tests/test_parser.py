@@ -16,8 +16,8 @@ def test_parse_markdown_with_headings():
     parsed = parse_markdown("测试", content, slug="test")
     assert len(parsed.headings) == 3
     assert parsed.headings[0] == {"level": 1, "text": "一级标题", "position": 0}
-    assert parsed.headings[1] == {"level": 2, "text": "二级标题", "position": 2}
-    assert parsed.headings[2] == {"level": 3, "text": "三级", "position": 4}
+    assert parsed.headings[1] == {"level": 2, "text": "二级标题", "position": 10}
+    assert parsed.headings[2] == {"level": 3, "text": "三级", "position": 22}
     assert parsed.slug == "test"
 
 

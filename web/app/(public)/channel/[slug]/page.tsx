@@ -89,7 +89,7 @@ export default async function ChannelPage({
       </section>
 
       {/* Filters: channel switch + tag filter */}
-      <section className="border-b border-outline-variant sticky top-16 z-30 bg-surface-container-lowest backdrop-blur-md">
+      <section className="border-b border-outline-variant sticky top-16 z-30 bg-black">
         <div className="mx-auto max-w-page-7xl px-margin-mobile md:px-margin-desktop py-5">
           {/* Channel switcher — tab style, mirrors top navbar */}
           {allChannels.length > 1 && (
@@ -157,7 +157,7 @@ export default async function ChannelPage({
       </section>
 
       {/* Channel articles */}
-      <section className="border-b border-outline-variant relative">
+      <section className="border-b border-outline-variant relative isolate">
         <div className="mx-auto max-w-page-7xl px-margin-mobile md:px-margin-desktop py-grid-major">
           <div className="flex justify-between items-end mb-12">
             <div>

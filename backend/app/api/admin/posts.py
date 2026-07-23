@@ -148,12 +148,14 @@ async def create_post(
     # 重新加载 channel 关系（async session 不支持懒加载）
     p = await post_crud.get_with_channel(db, p.id)
     logger.info("post_created", post_id=str(p.id), slug=p.slug)
-    # 发布状态的文章立即通知前端 revalidate
+    # 发布状态的文章立即通知前端 revalidate + 触发 RAG 入库
     if p.status == "published":
         await notify_revalidate(
             paths=_paths_for_post(p.slug),
             tags=_tags_for_post(p.slug),
         )
+        _try_dispatch_ingest_publish(str(p.id))
+        await _try_sync_meili_upsert(p)
     return envelope(_to_admin(p).model_dump())
 
 
@@ -173,10 +175,15 @@ async def update_post(
     post_id: UUID,
     payload: PostUpdate,
 ) -> dict:
-    """更新文章。"""
+    """更新文章。
+
+    内容变更（content_md/title/tags）且文章为 published 时触发重新入库；
+    状态从 published 切出时清理 chunks。
+    """
     p = await post_crud.get_with_channel(db, post_id)
     if not p:
         raise NotFoundError("文章不存在")
+    prev_status = p.status
     # 自动填充未提供的派生字段(content_md 变更时重新生成 toc/reading_time 等)
     _apply_derived_fields(payload)
     # slug 变更时预检
@@ -187,6 +194,21 @@ async def update_post(
     p = await post_crud.update(db, p, payload)
     await db.commit()
     logger.info("post_updated", post_id=str(p.id))
+
+    # RAG 入库触发：
+    # - 仍是 published 且内容字段被修改 → 重新入库（删旧建新，幂等）
+    # - 从 published 切到非 published → 清理 chunks
+    content_changed = any(
+        f in payload.__pydantic_fields_set__
+        for f in ("content_md", "title", "tags")
+    )
+    if p.status == "published" and content_changed:
+        _try_dispatch_ingest_publish(str(p.id))
+        await _try_sync_meili_upsert(p)
+    elif prev_status == "published" and p.status != "published":
+        _try_dispatch_ingest_delete(str(p.id))
+        await _try_sync_meili_delete(str(p.id))
+
     await notify_revalidate(
         paths=_paths_for_post(p.slug),
         tags=_tags_for_post(p.slug),
@@ -205,6 +227,7 @@ async def delete_post(db: DBSession, _: AdminId, post_id: UUID) -> dict:
     await db.commit()
     # 异步清理知识库 chunks（失败不阻塞删除）
     _try_dispatch_ingest_delete(str(post_id))
+    await _try_sync_meili_delete(str(post_id))
     logger.info("post_deleted", post_id=str(post_id))
     await notify_revalidate(
         paths=_paths_for_post(slug),
@@ -236,8 +259,10 @@ async def update_status(
     # 触发 Celery 入库任务
     if payload.status == "published":
         _try_dispatch_ingest_publish(str(post_id))
+        await _try_sync_meili_upsert(p)
     elif prev_status == "published" and payload.status != "published":
         _try_dispatch_ingest_delete(str(post_id))
+        await _try_sync_meili_delete(str(post_id))
 
     logger.info(
         "post_status_changed",
@@ -271,6 +296,28 @@ def _try_dispatch_ingest_delete(post_id: str) -> None:
         on_post_delete.delay(post_id)
     except Exception as e:
         logger.warning("ingest_dispatch_failed", kind="delete", post_id=post_id, error=str(e))
+
+
+async def _try_sync_meili_upsert(p) -> None:
+    """同步文章到 Meilisearch，失败不阻断主流程。"""
+    try:
+        from app.services.search import upsert_post_orm
+
+        ch_slug = p.channel.slug if p.channel else ""
+        ch_name = p.channel.name if p.channel else ""
+        await upsert_post_orm(p, ch_slug, ch_name)
+    except Exception as e:
+        logger.warning("meili_sync_failed", kind="upsert", post_id=str(p.id), error=str(e))
+
+
+async def _try_sync_meili_delete(post_id: str) -> None:
+    """从 Meilisearch 删除文章，失败不阻断主流程。"""
+    try:
+        from app.services.search import delete_post
+
+        await delete_post(post_id)
+    except Exception as e:
+        logger.warning("meili_sync_failed", kind="delete", post_id=post_id, error=str(e))
 
 
 @router.post("/{post_id}/revalidate")

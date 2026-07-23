@@ -69,17 +69,21 @@ class Settings(BaseSettings):
     llm_max_tokens: int = 2048
     llm_request_timeout: float = 60.0  # 流式首 token 超时阈值
 
-    # ===== Embedding（BGE-M3，Python 进程内加载） =====
+    # ===== Embedding（BGE-M3） =====
+    # 双模式：配了 embedding_tei_url 用 TEI 服务，否则进程内 sentence-transformers 加载
     embedding_model: str = "BAAI/bge-m3"
-    embedding_device: str = "cpu"  # cpu | cuda | mps
+    embedding_device: str = "cpu"  # cpu | cuda | mps（仅进程内模式）
     embedding_cache_dir: str = "./models"  # HuggingFace 模型缓存目录
     embedding_batch_size: int = 16
+    embedding_tei_url: str = ""  # TEI 服务地址，如 http://localhost:8080；空则进程内
 
-    # ===== Reranker（bge-reranker-v2-m3，Python 进程内加载） =====
+    # ===== Reranker（bge-reranker-v2-m3） =====
+    # 双模式：配了 reranker_tei_url 用 TEI 服务，否则进程内 sentence-transformers 加载
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
-    reranker_device: str = "cpu"  # cpu | cuda | mps
+    reranker_device: str = "cpu"  # cpu | cuda | mps（仅进程内模式）
     reranker_cache_dir: str = "./models"
     reranker_top_n: int = 5  # 精排后保留数量
+    reranker_tei_url: str = ""  # TEI 服务地址，如 http://localhost:8081；空则进程内
 
     # ===== Milvus 向量库 =====
     milvus_host: str = "localhost"
@@ -88,6 +92,14 @@ class Settings(BaseSettings):
     milvus_user: str = ""
     milvus_password: str = ""
     milvus_use_partition: bool = True  # 启用三级范围 partition 路由
+
+    # ===== Meilisearch 全文搜索 =====
+    # 仅索引 status=published 的文章，供前端即时搜索
+    meili_host: str = "localhost"
+    meili_port: int = 7700
+    meili_key: str = ""  # 开发可空；生产用 master key
+    meili_posts_index: str = "posts"
+    meili_enabled: bool = True  # False 时搜索接口返回空，不阻断启动
 
 
 @lru_cache

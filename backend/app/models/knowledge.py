@@ -30,7 +30,7 @@ class KnowledgeDoc(Base, UUIDPkMixin, TimestampMixin):
         UUID(as_uuid=True),
         ForeignKey("channels.id", ondelete="SET NULL"),
     )
-    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)  # pending|indexed|failed
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)  # pending|indexed|partial|failed
     error_msg: Mapped[str | None] = mapped_column(Text)
 
     chunks = relationship("Chunk", back_populates="doc", cascade="all, delete-orphan")

@@ -116,6 +116,39 @@ export async function fetchAbout(revalidate = 3600): Promise<AboutInfo> {
   return serverFetch<AboutInfo>('/about', { revalidate });
 }
 
+// ===== 搜索（Meilisearch）=====
+
+/** 搜索命中字段含 <mark> 高亮标签 */
+export interface SearchHit {
+  id: string;
+  slug: string;
+  title: string;
+  excerpt: string;
+  channelSlug: string;
+  channelName: string;
+  tags: string[];
+  publishedAt: number; // unix timestamp
+  readingTime: number;
+  _formatted: {
+    title: string;
+    excerpt: string;
+    content: string;
+  };
+}
+
+export interface SearchResponse {
+  hits: SearchHit[];
+  estimatedTotalHits: number;
+  processingTimeMs: number;
+  query: string;
+}
+
+export interface SearchSuggestion {
+  slug: string;
+  title: string;
+  views: number;
+}
+
 // ===== Client-side（'use client' 组件用）=====
 // 注意：response interceptor 已 unwrap envelope，request.get 返回的是 data 本身。
 // 这里用 as 断言修正类型。
@@ -150,5 +183,16 @@ export const api = {
   },
   async getAbout() {
     return unwrap<AboutInfo>(request.get('/about'));
+  },
+  async search(params: { q: string; limit?: number; channel?: string }) {
+    const qs = new URLSearchParams({ q: params.q });
+    if (params.limit) qs.set('limit', String(params.limit));
+    if (params.channel) qs.set('channel', params.channel);
+    return unwrap<SearchResponse>(request.get(`/search?${qs}`));
+  },
+  async searchSuggestions(limit = 5) {
+    return unwrap<{ suggestions: SearchSuggestion[] }>(
+      request.get(`/search/suggestions?limit=${limit}`),
+    );
   },
 };

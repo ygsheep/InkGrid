@@ -1,7 +1,4 @@
-"""后台人设路由：GET/PATCH /admin/personas[/:id] + POST（创建）。
-
-设计方案是 GET/PATCH，但 P0 加上 POST 创建以便初始化。
-"""
+"""后台人设路由：GET/POST/PATCH/DELETE /admin/personas[/:id]。"""
 from uuid import UUID
 
 from fastapi import APIRouter, Query
@@ -98,3 +95,18 @@ async def update_persona(
     await db.commit()
     logger.info("persona_updated", persona_id=str(p.id))
     return envelope(_to_admin(p).model_dump())
+
+
+@router.delete("/{persona_id}")
+async def delete_persona(db: DBSession, _: AdminId, persona_id: UUID) -> dict:
+    """删除人设。
+
+    关联的 Channel.persona_id FK 为 ondelete=SET NULL，会自动置空。
+    """
+    p = await persona_crud.get(db, persona_id)
+    if not p:
+        raise NotFoundError("人设不存在")
+    await persona_crud.remove(db, p)
+    await db.commit()
+    logger.info("persona_deleted", persona_id=str(persona_id))
+    return envelope({"ok": True})
