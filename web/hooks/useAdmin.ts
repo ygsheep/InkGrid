@@ -24,6 +24,7 @@ import {
   authApi,
   channelsApi,
   kbApi,
+  knowledgeApi,
   personasApi,
   postsApi,
   qaApi,
@@ -36,6 +37,7 @@ import {
   type AdminQaPair,
   type ChannelCreatePayload,
   type ChannelUpdatePayload,
+  type DeleteResult,
   type KbNote,
   type KbNoteCreatePayload,
   type KbNoteLink,
@@ -45,6 +47,8 @@ import {
   type KbTemplate,
   type KbTemplateCreatePayload,
   type KbTreeNode,
+  type KnowledgeDoc,
+  type KnowledgeListParams,
   type PersonaCreatePayload,
   type PersonaUpdatePayload,
   type PostCreatePayload,
@@ -52,10 +56,13 @@ import {
   type PostUpdatePayload,
   type QaListParams,
   type QaReviewPayload,
+  type RebuildResult,
   type RecentQuestion,
+  type ReindexResult,
   type SettingsUpdatePayload,
   type SiteSettings,
   type StatsOverview,
+  type UploadResult,
 } from '@/lib/api/admin';
 import type { Paginated } from '@/lib/api';
 
@@ -72,6 +79,8 @@ export const adminKeys = {
   persona: (id: string) => ['admin', 'persona', id] as const,
   qa: (params: QaListParams) => ['admin', 'qa', params] as const,
   qaDetail: (id: string) => ['admin', 'qa', 'detail', id] as const,
+  knowledgeDocs: (params: KnowledgeListParams) =>
+    ['admin', 'knowledge', 'docs', params] as const,
   settings: ['admin', 'settings'] as const,
   statsOverview: ['admin', 'stats', 'overview'] as const,
   statsRecentQuestions: (limit: number) =>
@@ -580,5 +589,109 @@ export function useCreateKbTemplate(
       opts?.onSuccess?.(...args);
     },
     ...opts,
+  });
+}
+
+// ===== Knowledge Docs（知识库文档管理）=====
+
+export function useKnowledgeDocs(
+  params: KnowledgeListParams = {},
+  opts?: UseQueryOptions<Paginated<KnowledgeDoc>>,
+) {
+  return useQuery({
+    queryKey: adminKeys.knowledgeDocs(params),
+    queryFn: () => knowledgeApi.list(params),
+    ...opts,
+  });
+}
+
+export function useUploadKnowledgeDoc(
+  opts?: UseMutationOptions<
+    UploadResult,
+    Error,
+    { files: File[]; channelId: string; title?: string }
+  >,
+) {
+  const qc = useQueryClient();
+  const { onSuccess, onError, ...rest } = opts ?? {};
+  return useMutation({
+    ...rest,
+    mutationFn: ({ files, channelId, title }) =>
+      knowledgeApi.upload(files, channelId, title),
+    onSuccess: (...args) => {
+      qc.invalidateQueries({ queryKey: ['admin', 'knowledge', 'docs'] });
+      onSuccess?.(...args);
+    },
+    onError,
+  });
+}
+
+export function useDeleteKnowledgeDoc(
+  opts?: UseMutationOptions<DeleteResult, Error, string>,
+) {
+  const qc = useQueryClient();
+  const { onSuccess, onError, ...rest } = opts ?? {};
+  return useMutation({
+    ...rest,
+    mutationFn: (docId: string) => knowledgeApi.remove(docId),
+    onSuccess: (...args) => {
+      qc.invalidateQueries({ queryKey: ['admin', 'knowledge', 'docs'] });
+      onSuccess?.(...args);
+    },
+    onError,
+  });
+}
+
+export function useDownloadKnowledgeDoc(
+  opts?: UseMutationOptions<
+    { blob: Blob; filename: string },
+    Error,
+    string
+  >,
+) {
+  const { onSuccess, onError, ...rest } = opts ?? {};
+  return useMutation({
+    ...rest,
+    mutationFn: (docId: string) => knowledgeApi.download(docId),
+    onSuccess: (...args) => {
+      onSuccess?.(...args);
+    },
+    onError,
+  });
+}
+
+export function useReindexKnowledgeDoc(
+  opts?: UseMutationOptions<ReindexResult, Error, string>,
+) {
+  const qc = useQueryClient();
+  const { onSuccess, onError, ...rest } = opts ?? {};
+  return useMutation({
+    ...rest,
+    mutationFn: (docId: string) => knowledgeApi.reindex(docId),
+    onSuccess: (...args) => {
+      setTimeout(() => {
+        qc.invalidateQueries({ queryKey: ['admin', 'knowledge', 'docs'] });
+      }, 3000);
+      onSuccess?.(...args);
+    },
+    onError,
+  });
+}
+
+export function useRebuildKnowledge(
+  opts?: UseMutationOptions<RebuildResult, Error, void>,
+) {
+  const qc = useQueryClient();
+  const { onSuccess, onError, ...rest } = opts ?? {};
+  return useMutation({
+    ...rest,
+    mutationFn: () => knowledgeApi.rebuild(),
+    onSuccess: (...args) => {
+      setTimeout(() => {
+        qc.invalidateQueries({ queryKey: ['admin', 'knowledge', 'docs'] });
+      }, 5000);
+      onSuccess?.(...args);
+    },
+    onError,
   });
 }

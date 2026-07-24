@@ -566,3 +566,121 @@ export const kbApi = {
     return unwrap<KbTemplate>(request.post('/admin/kb/templates', payload));
   },
 };
+
+// ===== Knowledge Docs（知识库文档管理）=====
+
+/**
+ * 知识库文档状态机（与后端 pipeline.py 对齐）：
+ * - pending:  新建，分块进行中
+ * - indexed:  解析→分块→写 PG→embedding→写 Milvus 全部成功
+ * - partial:  PG chunks 成功但 Milvus 失败（PG 有 chunks 缺向量）
+ * - failed:   解析 / 分块失败
+ */
+export interface KnowledgeDoc {
+  id: string;
+  source_type: 'article' | 'upload' | 'policy';
+  source_id: string | null;
+  title: string;
+  raw_uri: string | null;
+  original_filename: string | null;
+  source_format: 'md' | 'txt' | 'pdf' | 'docx' | null;
+  mime_type: string | null;
+  source_size: number | null;
+  chunk_count: number;
+  channel_id: string | null;
+  channel_slug: string | null;
+  channel_name: string | null;
+  status: 'pending' | 'indexed' | 'partial' | 'failed';
+  error_msg: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface KnowledgeListParams {
+  source_type?: string;
+  status?: string;
+  channel_id?: string;
+  q?: string;
+  page?: number;
+  size?: number;
+}
+
+export interface UploadFailedItem {
+  filename: string;
+  reason: string;
+}
+
+export interface UploadResult {
+  created: KnowledgeDoc[];
+  failed: UploadFailedItem[];
+}
+
+export interface DeleteResult {
+  id: string;
+  deleted: boolean;
+}
+
+export interface ReindexResult {
+  doc_id: string;
+  task_id: string;
+  status: 'queued';
+}
+
+export interface RebuildResult {
+  task_id: string;
+  status: 'queued';
+}
+
+export const knowledgeApi = {
+  list(params: KnowledgeListParams = {}) {
+    const qs = new URLSearchParams();
+    if (params.source_type) qs.set('source_type', params.source_type);
+    if (params.status) qs.set('status', params.status);
+    if (params.channel_id) qs.set('channel_id', params.channel_id);
+    if (params.q) qs.set('q', params.q);
+    if (params.page) qs.set('page', String(params.page));
+    if (params.size) qs.set('size', String(params.size));
+    return unwrap<Paginated<KnowledgeDoc>>(
+      request.get(`/admin/knowledge/docs${qs.toString() ? `?${qs}` : ''}`),
+    );
+  },
+  upload(files: File[], channelId: string, title?: string) {
+    const form = new FormData();
+    for (const f of files) {
+      form.append('files', f);
+    }
+    form.append('channel_id', channelId);
+    if (title && files.length === 1) form.append('title', title);
+    return unwrap<UploadResult>(
+      request.post('/admin/knowledge/upload', form, {
+        timeout: 120000,
+      }),
+    );
+  },
+  async download(docId: string): Promise<{ blob: Blob; filename: string }> {
+    const base = process.env.NEXT_PUBLIC_API_BASE || '/api';
+    const url = `${base}/admin/knowledge/docs/${docId}/download`;
+    const resp = await fetch(url, { credentials: 'include' });
+    if (!resp.ok) {
+      throw new Error(`下载失败: HTTP ${resp.status}`);
+    }
+    const cd = resp.headers.get('content-disposition') || '';
+    const m = /filename="([^"]+)"/.exec(cd);
+    const filename = m ? m[1] : docId;
+    const blob = await resp.blob();
+    return { blob, filename };
+  },
+  remove(docId: string) {
+    return unwrap<DeleteResult>(
+      request.delete(`/admin/knowledge/docs/${docId}`),
+    );
+  },
+  reindex(docId: string) {
+    return unwrap<ReindexResult>(
+      request.post(`/admin/knowledge/docs/${docId}/reindex`),
+    );
+  },
+  rebuild() {
+    return unwrap<RebuildResult>(request.post('/admin/knowledge/rebuild'));
+  },
+};
