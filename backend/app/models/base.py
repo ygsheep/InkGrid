@@ -4,14 +4,31 @@
 表结构必须与 alembic 迁移（alembic/versions/0001_init.py、0002_post_views.py）保持一致。
 """
 from datetime import datetime
+from uuid import UUID, uuid4
 
 from sqlalchemy import DateTime, func
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class Base(DeclarativeBase):
     """所有 ORM 模型的基类。"""
     pass
+
+
+class UUIDPkMixin:
+    """UUID 主键混入。
+
+    提供 id 字段（PG UUID，Python 端默认 uuid4）。
+    alembic 0001 迁移未对 admins/posts 的 id 设 server_default，
+    因此主键值由 ORM 层在插入时生成（非 DB 端 gen_random_uuid()）。
+    新表（note_links/note_templates/qa_pairs）迁移里虽然写了
+    server_default=gen_random_uuid()，但 ORM 仍会主动传值，行为一致。
+    """
+
+    id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
 
 
 class TimestampMixin:

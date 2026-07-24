@@ -92,7 +92,7 @@ class ArticleAdmin(BaseModel):
     excerpt: str | None = None
     content: str
     html: str | None = None
-    channel_id: str
+    channel_id: str | None = None
     channel_slug: str | None = None
     channel_name: str | None = None
     tags: list[str] | None = None

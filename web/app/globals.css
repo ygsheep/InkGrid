@@ -477,13 +477,17 @@ body {
 .bytemd-wrapper {
   background: var(--color-surface);
   border: 1px solid var(--color-outline-variant);
+  display: flex;
+  flex-direction: column;
+  min-height: 500px;
 }
 .bytemd-wrapper .bytemd {
   background: var(--color-surface);
   color: var(--color-on-surface);
   border-color: var(--color-outline-variant);
   font-family: var(--font-geist-sans);
-  height: 600px;
+  height: calc(100vh - 320px);
+  min-height: 400px;
 }
 .bytemd-wrapper .bytemd-toolbar {
   background: var(--color-surface);

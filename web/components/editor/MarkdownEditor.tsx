@@ -8,6 +8,7 @@ import highlight from '@bytemd/plugin-highlight';
 import math from '@bytemd/plugin-math';
 import mermaid from '@bytemd/plugin-mermaid';
 import 'bytemd/dist/index.min.css';
+import { Code, Columns2, Eye } from 'lucide-react';
 import { uploadsApi } from '@/lib/api/admin';
 import WikilinkSuggest, { type WikilinkItem } from './WikilinkSuggest';
 
@@ -26,6 +27,12 @@ import WikilinkSuggest, { type WikilinkItem } from './WikilinkSuggest';
  * - 输入 [[ 时弹出笔记搜索浮层
  * - ↑↓ 选择 · Enter 确认 · Esc 关闭
  * - 选中后插入 [[标题]]
+ *
+ * 编辑模式（mode）:
+ * - split: 源码 + 预览分屏（默认）
+ * - tab: 仅源码
+ * - preview: 仅预览
+ * 顶部右侧提供切换按钮
  */
 const basePlugins = [gfm(), highlight(), math(), mermaid()];
 
@@ -41,6 +48,8 @@ function isImageFile(file: File): boolean {
   return file.type.startsWith('image/');
 }
 
+type EditorMode = 'split' | 'tab' | 'preview';
+
 interface MarkdownEditorProps {
   value?: string;
   onChange?: (value: string) => void;
@@ -51,6 +60,10 @@ interface MarkdownEditorProps {
   searchNotes?: (q: string) => Promise<WikilinkItem[]>;
   /** 排除的笔记 id（避免自引用） */
   excludeNoteId?: string;
+  /** 编辑模式（受控） */
+  mode?: EditorMode;
+  /** 模式变化回调 */
+  onModeChange?: (mode: EditorMode) => void;
 }
 
 /** 双链补全上下文 */
@@ -69,6 +82,8 @@ export default function MarkdownEditor({
   enableWikilink = false,
   searchNotes,
   excludeNoteId,
+  mode = 'split',
+  onModeChange,
 }: MarkdownEditorProps) {
   // CodeMirror 实例（CM5）。用 any 规避 @types/codemirror 版本差异。
   const cmRef = useRef<any>(null);
@@ -214,11 +229,35 @@ export default function MarkdownEditor({
 
   return (
     <div className="bytemd-wrapper" onPaste={handlePaste} onDrop={handleDrop}>
+      {/* 模式切换工具条（右上角悬浮） */}
+      {onModeChange && (
+        <div className="flex items-center justify-end gap-1 px-3 py-1.5 border-b border-outline-variant bg-surface-container-lowest">
+          <ModeButton
+            active={mode === 'tab'}
+            onClick={() => onModeChange('tab')}
+            icon={<Code size={13} />}
+            label="源码"
+          />
+          <ModeButton
+            active={mode === 'split'}
+            onClick={() => onModeChange('split')}
+            icon={<Columns2 size={13} />}
+            label="分屏"
+          />
+          <ModeButton
+            active={mode === 'preview'}
+            onClick={() => onModeChange('preview')}
+            icon={<Eye size={13} />}
+            label="预览"
+          />
+        </div>
+      )}
       <Editor
         value={value}
         plugins={plugins}
         placeholder={placeholder}
         onChange={onChange}
+        mode={mode}
       />
       {enableWikilink && (
         <WikilinkSuggest
@@ -231,5 +270,32 @@ export default function MarkdownEditor({
         />
       )}
     </div>
+  );
+}
+
+function ModeButton({
+  active,
+  onClick,
+  icon,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex items-center gap-1 px-2 py-1 font-mono text-label-mono uppercase tracking-widest transition-colors ${
+        active
+          ? 'bg-primary text-on-primary'
+          : 'text-on-surface-variant hover:text-primary hover:bg-surface-container-high'
+      }`}
+    >
+      {icon}
+      <span>{label}</span>
+    </button>
   );
 }

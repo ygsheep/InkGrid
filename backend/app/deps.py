@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AuthError
 from app.core.security import decode_access_token
+from app.core.session import is_session_valid
 from app.db.redis import get_redis
 from app.db.session import get_db
 from redis.asyncio import Redis
@@ -54,7 +55,11 @@ async def require_admin(
 ) -> str:
     """后台鉴权依赖：校验 cookie admin_token。
 
+    流程：① JWT 解码（签名+过期）→ ② 若 payload 含 jti，校验 Redis session 存在性。
     返回 admin_id（JWT sub）。无 token 或无效抛 AuthError。
+
+    jti 校验使 logout 可立即失效 token（删 Redis key），无需等待 JWT 自然过期。
+    无 jti 的旧 token 仅做 JWT 校验，向后兼容。
     """
     if not admin_token:
         raise AuthError("未登录")
@@ -64,6 +69,11 @@ async def require_admin(
     sub = payload.get("sub")
     if not sub:
         raise AuthError("token 缺少 sub")
+    # 若 token 带 jti，必须校验 Redis session 存活（支持 logout 主动失效）
+    jti = payload.get("jti")
+    if jti:
+        if not await is_session_valid(jti):
+            raise AuthError("会话已失效，请重新登录")
     return str(sub)
 
 

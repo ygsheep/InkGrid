@@ -1,7 +1,7 @@
 """后台 API 路由聚合（需鉴权，除 login）。"""
 from fastapi import APIRouter
 
-from app.api.admin import auth, channels, kb, personas, posts, qa, settings, stats, uploads
+from app.api.admin import auth, channels, kb, knowledge, personas, posts, qa, settings, stats, uploads
 
 router = APIRouter()
 router.include_router(auth.router)

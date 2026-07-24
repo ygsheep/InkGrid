@@ -1,16 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { App, Button, Form, Input, Select, Space, Tag, Tooltip } from 'antd';
-import {
-  ArrowLeft,
-  Check,
-  Link2,
-  Plus,
-  FileText,
-} from 'lucide-react';
+import { App, Form, Input } from 'antd';
+import { ArrowLeft, Settings2, Plus, Save } from 'lucide-react';
 import {
   useAdminChannels,
   useCreateKbNote,
@@ -25,6 +19,9 @@ import {
   type KbNoteUpdatePayload,
 } from '@/lib/api/admin';
 import MarkdownEditor from '@/components/editor/MarkdownEditor';
+import MetaDrawer from '@/components/editor/MetaDrawer';
+import EditorStatusBar from '@/components/editor/EditorStatusBar';
+import EditorShell from '@/components/editor/EditorShell';
 import type { WikilinkItem } from '@/components/editor/WikilinkSuggest';
 import { slugify } from '@/lib/utils';
 
@@ -35,41 +32,49 @@ type FormValues = {
   category: string;
   folder_path?: string;
   content_md: string;
-  channel_id?: string; // published 必填，draft/private 可空
+  channel_id?: string;
   tags?: string[];
   status: string;
   is_moc?: boolean;
   source_url?: string;
 };
 
-const STATUS_OPTIONS = [
-  { label: '草稿', value: 'draft' },
-  { label: '私有', value: 'private' },
-  { label: '已发布', value: 'published' },
-];
-
-const CATEGORY_OPTIONS = [
-  { label: '00 收集箱', value: 'inbox' },
-  { label: '01 每日笔记', value: 'daily' },
-  { label: '02 阅读笔记', value: 'reading' },
-  { label: '03 主题知识', value: 'knowledge' },
-  { label: '04 项目资料', value: 'projects' },
-  { label: '05 模板库', value: 'templates' },
-];
-
 /** 草稿自动保存间隔(毫秒) */
 const AUTOSAVE_DELAY = 5000;
+
+/** 新建笔记自动创建延迟(毫秒) —— 比编辑自动保存短，尽快创建并跳转编辑页 */
+const AUTOCREATE_DELAY = 2000;
+
+/** 当前时间作为标题（YYYY-MM-DD HH:mm） */
+function nowAsTitle(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** metaValues 初始值 */
+const META_VALUES_INIT = {
+  status: 'draft',
+  channel_id: undefined as string | undefined,
+  category: 'inbox',
+  folder_path: '' as string,
+  slug: '',
+  tags: [] as string[],
+  is_moc: false,
+  source_url: '' as string,
+  excerpt: '' as string,
+};
 
 /**
  * 知识库笔记编辑器（共用新建/编辑）。
  *
- * 功能：
- * - 复用 Bytemd Markdown 编辑器（与文章编辑器一致，支持图片粘贴/拖拽上传）
- * - 侧栏：category/folder_path/status/tags/is_moc/source_url 元信息
- * - 反链面板：显示哪些笔记引用了当前笔记（编辑模式）
- * - 出链列表：显示当前笔记引用了哪些笔记（含悬空链接）
- * - 草稿自动保存：5s 防抖，仅 draft 状态
- * - 模板注入：新建时可选择模板，自动填充 content_md
+ * 三段式布局（参考 Notion / Obsidian）：
+ * - 顶部条：返回 / 面包屑 / 保存状态 / META 按钮 / 状态徽章
+ * - 写作区：占满宽度，hero 标题 + 全宽编辑器
+ * - 底部条：字数 / 阅读 / 出链 / 反链 / 保存按钮
+ *
+ * 元信息（状态/频道/分类/Slug/Tags/MOC/来源/摘要/模板）收进顶部
+ * META 抽屉浮层，写作时消失，按需展开。
  */
 export default function NoteEditor({ note }: { note?: KbNote }) {
   const router = useRouter();
@@ -78,12 +83,43 @@ export default function NoteEditor({ note }: { note?: KbNote }) {
   const isEdit = !!note;
 
   const slugTouchedRef = useRef(false);
+  const metaTriggerRef = useRef<HTMLButtonElement>(null);
+
+  // Refs 用于在异步回调（setTimeout/setTimeout 闭包）中获取最新 state
+  const contentMdRef = useRef('');
+  const titleValueRef = useRef('');
+  const statusValueRef = useRef('draft');
+  const metaValuesRef = useRef(META_VALUES_INIT);
+  const categoryValueRef = useRef('inbox');
+  const folderPathValueRef = useRef('');
 
   const [autoSaveStatus, setAutoSaveStatus] = useState<
     'idle' | 'pending' | 'saving' | 'saved'
   >('idle');
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestValuesRef = useRef<FormValues | null>(null);
+
+  const [metaDrawerVisible, setMetaDrawerVisible] = useState(false);
+  const [editorMode, setEditorMode] = useState<'split' | 'tab' | 'preview'>('split');
+
+  // 实时内容（用于字数/出链统计）—— 用 state 而非 Form.useWatch，确保编辑器输入时触发重渲染
+  const [contentMd, setContentMd] = useState('');
+  const [titleValue, setTitleValue] = useState('');
+
+  // MetaDrawer 需要的完整表单值（避免它在 render 阶段调 form.getFieldValue）
+  // 必须在 useCallback/useMemo 之前定义，否则 TDZ 错误
+  const [statusValue, setStatusValue] = useState('draft');
+  const [categoryValue, setCategoryValue] = useState('inbox');
+  const [folderPathValue, setFolderPathValue] = useState('');
+  const [metaValues, setMetaValues] = useState(META_VALUES_INIT);
+
+  // 同步 refs（在 render 阶段同步，确保异步回调能读到最新值）
+  contentMdRef.current = contentMd;
+  titleValueRef.current = titleValue;
+  statusValueRef.current = statusValue;
+  metaValuesRef.current = metaValues;
+  categoryValueRef.current = categoryValue;
+  folderPathValueRef.current = folderPathValue;
 
   // 模板列表（新建模式才需要）
   const { data: templates } = useKbTemplates(undefined, { enabled: !isEdit });
@@ -133,24 +169,35 @@ export default function NoteEditor({ note }: { note?: KbNote }) {
       is_moc: note.is_moc,
       source_url: note.source_url || undefined,
     });
+    // 同步到 state（用于实时统计和 UI 显示）
+    setTitleValue(note.title);
+    setContentMd(note.content_md);
+    setStatusValue(note.status);
+    setCategoryValue(note.category);
+    setFolderPathValue(note.folder_path || '');
+    setMetaValues({
+      status: note.status,
+      channel_id: note.channel_id || undefined,
+      category: note.category,
+      folder_path: note.folder_path || '',
+      slug: note.slug,
+      tags: note.tags || [],
+      is_moc: note.is_moc,
+      source_url: note.source_url || '',
+      excerpt: note.excerpt || '',
+    });
   }, [note, form]);
 
   // title 变化时自动生成 slug
   const handleTitleChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const title = e.target.value;
+      titleValueRef.current = title;
+      setTitleValue(title);
       form.setFieldValue('title', title);
       if (!slugTouchedRef.current) {
         form.setFieldValue('slug', slugify(title));
       }
-    },
-    [form],
-  );
-
-  const handleSlugChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      slugTouchedRef.current = true;
-      form.setFieldValue('slug', e.target.value);
     },
     [form],
   );
@@ -160,21 +207,25 @@ export default function NoteEditor({ note }: { note?: KbNote }) {
     (templateId: string) => {
       const tpl = templates?.find((t) => t.id === templateId);
       if (!tpl) return;
-      const current = form.getFieldValue('content_md') || '';
-      // 简单替换占位符 {{date}}
+      const current = contentMd || '';
       const today = new Date().toISOString().slice(0, 10);
       const filled = tpl.content_md
         .replace(/\{\{date\}\}/g, today)
-        .replace(/\{\{title\}\}/g, form.getFieldValue('title') || '')
-        .replace(/\{\{topic\}\}/g, form.getFieldValue('title') || '')
-        .replace(/\{\{book_title\}\}/g, form.getFieldValue('title') || '');
-      form.setFieldValue('content_md', current + (current ? '\n\n' : '') + filled);
+        .replace(/\{\{title\}\}/g, titleValue || '')
+        .replace(/\{\{topic\}\}/g, titleValue || '')
+        .replace(/\{\{book_title\}\}/g, titleValue || '');
+      const newContent = current + (current ? '\n\n' : '') + filled;
+      setContentMd(newContent);
+      form.setFieldValue('content_md', newContent);
       if (!form.getFieldValue('category')) {
         form.setFieldValue('category', tpl.category);
+        setCategoryValue(tpl.category);
+        setMetaValues((m) => ({ ...m, category: tpl.category }));
       }
       message.success(`已套用模板：${tpl.name}`);
+      setMetaDrawerVisible(false);
     },
-    [templates, form, message],
+    [templates, form, message, contentMd, titleValue],
   );
 
   // 双链笔记搜索（供 MarkdownEditor 调用）
@@ -183,34 +234,80 @@ export default function NoteEditor({ note }: { note?: KbNote }) {
     return res.items.map((i) => ({ id: i.id, title: i.title }));
   }, []);
 
-  // 草稿自动保存
+  // 草稿自动保存 / 新建自动创建（从 ref 读取最新 state，避免闭包陷阱）
   const triggerAutoSave = useCallback(
-    (values: FormValues) => {
-      if (!isEdit || !note) return;
-      if (values.status !== 'draft') return;
+    () => {
       if (autoSaveStatus === 'saving') return;
 
-      latestValuesRef.current = values;
+      // 新建模式：用户输入正文后自动创建（标题为空则用当前时间）
+      if (!isEdit) {
+        // 只有正文非空才触发自动创建，避免空笔记
+        if (!contentMdRef.current?.trim()) return;
+        if (statusValueRef.current !== 'draft') return;
+
+        setAutoSaveStatus('pending');
+
+        if (autoSaveTimerRef.current) {
+          clearTimeout(autoSaveTimerRef.current);
+        }
+        autoSaveTimerRef.current = setTimeout(async () => {
+          setAutoSaveStatus('saving');
+          const mv = metaValuesRef.current;
+          const title = titleValueRef.current?.trim() || nowAsTitle();
+          const slug = slugTouchedRef.current
+            ? (form.getFieldValue('slug') || slugify(title))
+            : slugify(title);
+          const payload: KbNoteCreatePayload = {
+            slug,
+            title,
+            excerpt: mv.excerpt || null,
+            category: categoryValueRef.current || 'inbox',
+            folder_path: folderPathValueRef.current || null,
+            content_md: contentMdRef.current,
+            channel_id: mv.channel_id || null,
+            tags: mv.tags?.length ? mv.tags : null,
+            status: statusValueRef.current || 'draft',
+            is_moc: mv.is_moc || false,
+            source_url: mv.source_url || null,
+          };
+          try {
+            await createNote.mutateAsync(payload);
+            // onSuccess 会跳转到编辑页
+          } catch {
+            setAutoSaveStatus('idle');
+          }
+        }, AUTOCREATE_DELAY);
+        return;
+      }
+
+      // 编辑模式：草稿自动保存
+      if (!note) return;
+      if (statusValueRef.current !== 'draft') return;
+
       setAutoSaveStatus('pending');
 
       if (autoSaveTimerRef.current) {
         clearTimeout(autoSaveTimerRef.current);
       }
       autoSaveTimerRef.current = setTimeout(async () => {
-        const v = latestValuesRef.current;
-        if (!v || !note) return;
+        if (!note) return;
         setAutoSaveStatus('saving');
+        const mv = metaValuesRef.current;
+        const title = titleValueRef.current?.trim() || nowAsTitle();
+        const slug = slugTouchedRef.current
+          ? (form.getFieldValue('slug') || slugify(title))
+          : slugify(title);
         const payload: KbNoteUpdatePayload = {
-          slug: v.slug,
-          title: v.title,
-          excerpt: v.excerpt || null,
-          category: v.category,
-          folder_path: v.folder_path || null,
-          content_md: v.content_md,
-          tags: v.tags?.length ? v.tags : null,
-          status: v.status,
-          is_moc: v.is_moc || false,
-          source_url: v.source_url || null,
+          slug,
+          title,
+          excerpt: mv.excerpt || null,
+          category: categoryValueRef.current || 'inbox',
+          folder_path: folderPathValueRef.current || null,
+          content_md: contentMdRef.current,
+          tags: mv.tags?.length ? mv.tags : null,
+          status: statusValueRef.current,
+          is_moc: mv.is_moc || false,
+          source_url: mv.source_url || null,
         };
         try {
           await updateNote.mutateAsync({ id: note.id, payload });
@@ -220,7 +317,7 @@ export default function NoteEditor({ note }: { note?: KbNote }) {
         }
       }, AUTOSAVE_DELAY);
     },
-    [isEdit, note, autoSaveStatus, updateNote],
+    [isEdit, note, autoSaveStatus, updateNote, createNote, form],
   );
 
   useEffect(() => {
@@ -231,27 +328,49 @@ export default function NoteEditor({ note }: { note?: KbNote }) {
     };
   }, []);
 
+  /** 从 state 直接构造创建/更新 payload（标题为空时用当前时间，不依赖 form.getFieldsValue） */
+  const buildPayloadFromState = useCallback(() => {
+    const title = titleValue?.trim() || nowAsTitle();
+    const slug = slugTouchedRef.current
+      ? (form.getFieldValue('slug') || slugify(title))
+      : slugify(title);
+    const tags = metaValues.tags?.length ? metaValues.tags : null;
+    const channelId =
+      statusValue === 'published' ? metaValues.channel_id : metaValues.channel_id || null;
+    return { title, slug, tags, channelId };
+  }, [titleValue, form, metaValues, statusValue]);
+
   const onFinish = (values: FormValues) => {
+    // 保留 form.submit() 入口（隐藏的 submit 按钮），但实际逻辑由 handleSubmit 直接处理
     if (autoSaveTimerRef.current) {
       clearTimeout(autoSaveTimerRef.current);
     }
-    const tags = values.tags?.length ? values.tags : null;
-    // published 必须有 channel；draft/private 可无
-    const channelId =
-      values.status === 'published' ? values.channel_id : values.channel_id || null;
+  };
+
+  const submitting = createNote.isPending || updateNote.isPending;
+
+  // 提交前处理：标题为空用当前时间，直接调用 mutation（用 state 构造 payload，绕过 form 链路）
+  const handleSubmit = useCallback(() => {
+    const { title, slug, tags, channelId } = buildPayloadFromState();
+    // 注意：不在 handleSubmit 中调用 setTitleValue，避免重渲染干扰 mutate
+    if (statusValue === 'published' && !metaValues.channel_id) {
+      message.error('发布到博客必须选择频道（在 META 面板中设置）');
+      setMetaDrawerVisible(true);
+      return;
+    }
     if (isEdit && note) {
       const payload: KbNoteUpdatePayload = {
-        slug: values.slug,
-        title: values.title,
-        excerpt: values.excerpt || null,
-        category: values.category,
-        folder_path: values.folder_path || null,
-        content_md: values.content_md,
+        slug,
+        title,
+        excerpt: metaValues.excerpt || null,
+        category: categoryValue || 'inbox',
+        folder_path: folderPathValue || null,
+        content_md: contentMd || '',
         channel_id: channelId,
         tags,
-        status: values.status,
-        is_moc: values.is_moc || false,
-        source_url: values.source_url || null,
+        status: statusValue || 'draft',
+        is_moc: metaValues.is_moc || false,
+        source_url: metaValues.source_url || null,
       };
       updateNote.mutate(
         { id: note.id, payload },
@@ -264,338 +383,292 @@ export default function NoteEditor({ note }: { note?: KbNote }) {
       );
     } else {
       const payload: KbNoteCreatePayload = {
-        slug: values.slug,
-        title: values.title,
-        excerpt: values.excerpt || null,
-        category: values.category || 'inbox',
-        folder_path: values.folder_path || null,
-        content_md: values.content_md,
+        slug,
+        title,
+        excerpt: metaValues.excerpt || null,
+        category: categoryValue || 'inbox',
+        folder_path: folderPathValue || null,
+        content_md: contentMd || '',
         channel_id: channelId,
         tags,
-        status: values.status || 'draft',
-        is_moc: values.is_moc || false,
-        source_url: values.source_url || null,
+        status: statusValue || 'draft',
+        is_moc: metaValues.is_moc || false,
+        source_url: metaValues.source_url || null,
       };
       createNote.mutate(payload);
     }
-  };
+  }, [buildPayloadFromState, statusValue, metaValues, message,
+      isEdit, note, categoryValue, folderPathValue, contentMd,
+      createNote, updateNote]);
 
-  const submitting = createNote.isPending || updateNote.isPending;
+  // ===== 实时统计 =====
+  const stats = useMemo(() => {
+    const text = contentMd || '';
+    // 字数：中文按字，英文按词
+    const cjk = (text.match(/[\u4e00-\u9fff]/g) || []).length;
+    const en = (text.match(/[a-zA-Z]+/g) || []).length;
+    const wordCount = cjk + en;
+    // 阅读时长：中文 300 字/分，英文 200 词/分
+    const readingTime = Math.max(1, Math.ceil(cjk / 300 + en / 200));
+    // 出链数（[[xxx]] 且非 ![[）
+    const outlinks = (text.match(/(?<!!)\[\[[^\]]+\]\]/g) || []).length;
+    return { wordCount, readingTime, outlinks };
+  }, [contentMd]);
+
+  const backlinksCount = backlinks?.length || 0;
+
+  // 面包屑分类映射
+  const categoryLabel = useMemo(() => {
+    const map: Record<string, string> = {
+      inbox: '00_Inbox',
+      daily: '01_Daily',
+      reading: '02_Reading',
+      knowledge: '03_Knowledge',
+      projects: '04_Projects',
+      templates: '05_Templates',
+      assets: '06_Assets',
+    };
+    return map[categoryValue] || categoryValue;
+  }, [categoryValue]);
+
+  /** 统一字段变化处理：Form.onValuesChange 和 MetaDrawer.onFieldChange 共用 */
+  const handleFieldChange = useCallback((field: string, value: unknown) => {
+    switch (field) {
+      case 'status':
+        setStatusValue((value as string) || 'draft');
+        setMetaValues((m) => ({ ...m, status: (value as string) || 'draft' }));
+        break;
+      case 'category':
+        setCategoryValue((value as string) || 'inbox');
+        setMetaValues((m) => ({ ...m, category: (value as string) || 'inbox' }));
+        break;
+      case 'folder_path':
+        setFolderPathValue((value as string) || '');
+        setMetaValues((m) => ({ ...m, folder_path: (value as string) || '' }));
+        break;
+      case 'content_md':
+        setContentMd((value as string) || '');
+        break;
+      case 'title':
+        setTitleValue((value as string) || '');
+        break;
+      case 'channel_id':
+        setMetaValues((m) => ({ ...m, channel_id: value as string | undefined }));
+        break;
+      case 'slug':
+        setMetaValues((m) => ({ ...m, slug: (value as string) || '' }));
+        break;
+      case 'tags':
+        setMetaValues((m) => ({ ...m, tags: (value as string[]) || [] }));
+        break;
+      case 'is_moc':
+        setMetaValues((m) => ({ ...m, is_moc: (value as boolean) || false }));
+        break;
+      case 'source_url':
+        setMetaValues((m) => ({ ...m, source_url: (value as string) || '' }));
+        break;
+      case 'excerpt':
+        setMetaValues((m) => ({ ...m, excerpt: (value as string) || '' }));
+        break;
+    }
+  }, []);
+
+  /** Form.onValuesChange：遍历 changed 字段逐一同步 */
+  const onValuesChangeHandler = useCallback(
+    (changed: Partial<FormValues>, _allValues: FormValues) => {
+      for (const field of Object.keys(changed) as (keyof FormValues)[]) {
+        handleFieldChange(field, changed[field]);
+      }
+    },
+    [handleFieldChange],
+  );
 
   return (
-    <div>
-      <div className="flex items-center justify-between gap-4 mb-6">
-        <div className="flex items-center gap-3">
-          <Link href="/admin/knowledge">
-            <Button type="text" icon={<ArrowLeft size={16} />} />
-          </Link>
-          <div>
-            <h1 className="font-headline text-headline-md text-primary uppercase tracking-tighter">
-              {isEdit ? '编辑笔记' : '新建笔记'}
-            </h1>
-            <p className="font-mono text-label-mono text-on-surface-variant mt-1 uppercase tracking-widest">
-              {isEdit ? `NOTE · ${note?.slug}` : 'NEW NOTE'}
-            </p>
-          </div>
-        </div>
-        <Space>
-          {isEdit && autoSaveStatus !== 'idle' && (
-            <span className="font-mono text-label-mono text-on-surface-variant uppercase tracking-widest flex items-center gap-1">
-              {autoSaveStatus === 'pending' && <span className="text-tertiary-fixed">编辑中…</span>}
-              {autoSaveStatus === 'saving' && <span className="text-tertiary-fixed">保存中…</span>}
-              {autoSaveStatus === 'saved' && (
-                <>
-                  <Check size={12} className="text-primary" />
-                  <span className="text-primary">已自动保存</span>
-                </>
-              )}
-            </span>
-          )}
-          <Link href="/admin/knowledge">
-            <Button>取消</Button>
-          </Link>
-          <Button
-            type="primary"
-            onClick={() => form.submit()}
-            loading={submitting}
-          >
-            {isEdit ? '保存' : '创建'}
-          </Button>
-        </Space>
-      </div>
-
-      <Form<FormValues>
-        form={form}
-        layout="vertical"
-        onFinish={onFinish}
-        onValuesChange={(_, allValues) => triggerAutoSave(allValues)}
-        initialValues={{
-          status: 'draft',
-          category: 'inbox',
-        }}
-        requiredMark={false}
-      >
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-6">
-          {/* 主区：标题 + 正文 */}
-          <div className="space-y-4 min-w-0">
-            <Form.Item
-              name="title"
-              label={fieldLabel('标题')}
-              rules={[{ required: true, message: '请输入标题' }]}
-            >
-              <Input
-                size="large"
-                placeholder="笔记标题（双链 [[标题]] 会按此匹配）"
-                onChange={handleTitleChange}
-              />
-            </Form.Item>
-
-            {!isEdit && templates && templates.length > 0 && (
-              <Form.Item label={fieldLabel('套用模板（可选）')}>
-                <Select
-                  placeholder="选择模板自动填充正文"
-                  allowClear
-                  onChange={handleTemplate}
-                  options={templates.map((t) => ({
-                    label: `${t.name}（${t.category}）`,
-                    value: t.id,
-                  }))}
-                />
-              </Form.Item>
-            )}
-
-            <Form.Item
-              name="content_md"
-              label={fieldLabel('正文（Markdown · 源码/预览分屏）')}
-              rules={[{ required: true, message: '请输入正文' }]}
-              extra={
-                <span className="font-mono text-label-mono text-tertiary-fixed uppercase tracking-widest">
-                  BYTEMD · GFM / HIGHLIGHT / MATH / MERMAID · [[双链]] · #标签 · 粘贴/拖拽图片自动上传
+    <Form<FormValues>
+      form={form}
+      layout="vertical"
+      onFinish={onFinish}
+      onValuesChange={onValuesChangeHandler}
+      initialValues={{
+        status: 'draft',
+        category: 'inbox',
+      }}
+      requiredMark={false}
+    >
+      <EditorShell
+        topBar={
+          <>
+            {/* ===== 左侧：返回 + 面包屑 ===== */}
+            <div className="flex items-center gap-3">
+              <Link
+                href="/admin/knowledge"
+                className="text-on-surface-variant hover:text-primary transition-colors"
+              >
+                <ArrowLeft size={16} />
+              </Link>
+              <span className="font-mono text-label-mono text-on-surface-variant uppercase tracking-widest">
+                知识库
+                <span className="text-outline-variant mx-1">/</span>
+                <span className="text-on-surface">
+                  {isEdit ? note?.slug : '新建笔记'}
                 </span>
-              }
-            >
-              <MarkdownEditor
-                placeholder="## 标题&#10;&#10;支持 [[双链]]、#标签、GFM、代码高亮、数学公式、Mermaid"
-                enableWikilink
-                searchNotes={searchNotes}
-                excludeNoteId={note?.id}
-              />
-            </Form.Item>
-
-            <Form.Item
-              name="excerpt"
-              label={fieldLabel('摘要')}
-              extra={
-                <span className="font-mono text-label-mono text-tertiary-fixed">
-                  留空则从正文首段自动生成
-                </span>
-              }
-            >
-              <Input.TextArea
-                autoSize={{ minRows: 2, maxRows: 4 }}
-                placeholder="一行简介（留空自动生成）"
-              />
-            </Form.Item>
-          </div>
-
-          {/* 侧栏：元信息 + 反链/出链 */}
-          <div className="space-y-4">
-            <div className="border border-outline-variant bg-surface-container-lowest p-4 space-y-4">
-              <Form.Item
-                name="status"
-                label={fieldLabel('状态')}
-                rules={[{ required: true }]}
-              >
-                <Select options={STATUS_OPTIONS} />
-              </Form.Item>
-
-              <Form.Item
-                noStyle
-                shouldUpdate={(prev, cur) => prev.status !== cur.status}
-              >
-                {({ getFieldValue }) => {
-                  const isPublished = getFieldValue('status') === 'published';
-                  return (
-                    <Form.Item
-                      name="channel_id"
-                      label={fieldLabel('频道')}
-                      rules={[
-                        {
-                          required: isPublished,
-                          message: '发布到博客必须选择频道',
-                        },
-                      ]}
-                      extra={
-                        <span className="font-mono text-label-mono text-tertiary-fixed">
-                          {isPublished
-                            ? '发布到博客必填'
-                            : '私有/草稿可不选'}
-                        </span>
-                      }
-                    >
-                      <Select
-                        loading={channelsLoading}
-                        placeholder="选择频道"
-                        allowClear={!isPublished}
-                        options={(channelsData?.items || []).map((c) => ({
-                          label: c.name,
-                          value: c.id,
-                        }))}
-                      />
-                    </Form.Item>
-                  );
-                }}
-              </Form.Item>
-
-              <Form.Item
-                name="category"
-                label={fieldLabel('分类目录')}
-                rules={[{ required: true }]}
-              >
-                <Select options={CATEGORY_OPTIONS} />
-              </Form.Item>
-
-              <Form.Item
-                name="folder_path"
-                label={fieldLabel('子目录')}
-                extra={
-                  <span className="font-mono text-label-mono text-tertiary-fixed">
-                    仅 knowledge/projects 用，如 knowledge/大模型
-                  </span>
-                }
-              >
-                <Input placeholder="knowledge/大模型" />
-              </Form.Item>
-
-              <Form.Item
-                name="slug"
-                label={fieldLabel('Slug')}
-                extra={
-                  <span className="font-mono text-label-mono text-tertiary-fixed">
-                    留空则从标题自动生成
-                  </span>
-                }
-                rules={[
-                  { required: true, message: '请输入 slug' },
-                  {
-                    pattern: /^[a-z0-9\u4e00-\u9fff-]+$/,
-                    message: '只能小写字母/数字/中文/连字符',
-                  },
-                ]}
-              >
-                <Input placeholder="url-friendly-slug" onChange={handleSlugChange} />
-              </Form.Item>
-
-              <Form.Item name="tags" label={fieldLabel('标签')}>
-                <Select
-                  mode="tags"
-                  placeholder="按回车添加"
-                  tokenSeparators={[',', ' ']}
-                />
-              </Form.Item>
-
-              <Form.Item name="is_moc" label={fieldLabel('MOC 主题地图')}>
-                <Select
-                  options={[
-                    { label: '否', value: false },
-                    { label: '是（主题地图节点）', value: true },
-                  ]}
-                />
-              </Form.Item>
-
-              <Form.Item
-                name="source_url"
-                label={fieldLabel('来源 URL')}
-                extra={
-                  <span className="font-mono text-label-mono text-tertiary-fixed">
-                    阅读笔记的原文链接
-                  </span>
-                }
-              >
-                <Input placeholder="https://..." />
-              </Form.Item>
+              </span>
             </div>
 
-            {/* 出链列表（编辑模式） */}
-            {isEdit && note?.outlinks && note.outlinks.length > 0 && (
-              <div className="border border-outline-variant bg-surface-container-lowest p-4">
-                <div className="font-mono text-label-mono text-on-surface-variant uppercase tracking-widest mb-3 flex items-center gap-2">
-                  <Link2 size={12} />
-                  出链 · {note.outlinks.length}
-                </div>
-                <div className="space-y-1.5">
-                  {note.outlinks.map((link) => (
-                    <div key={link.id} className="flex items-center gap-2 text-sm">
-                      <span className="text-tertiary-fixed font-mono">[[</span>
-                      {link.target_note_id ? (
-                        <Link
-                          href={`/admin/knowledge/${link.target_note_id}/edit`}
-                          className="text-primary hover:underline truncate"
-                        >
-                          {link.target_title_raw}
-                        </Link>
-                      ) : (
-                        <span className="text-tertiary-fixed italic truncate">
-                          {link.target_title_raw}（悬空）
-                        </span>
-                      )}
-                      <span className="text-tertiary-fixed font-mono">]]</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            {/* ===== 右侧：保存状态 / META / 状态徽章 / 主操作 ===== */}
+            <div className="relative flex items-center gap-3">
+              {/* 保存状态 */}
+              {autoSaveStatus !== 'idle' && (
+                <span className="font-mono text-label-mono uppercase tracking-widest flex items-center gap-1">
+                  {autoSaveStatus === 'pending' && (
+                    <span className="text-tertiary-fixed">
+                      {isEdit ? '编辑中…' : '待创建…'}
+                    </span>
+                  )}
+                  {autoSaveStatus === 'saving' && (
+                    <span className="text-tertiary-fixed">
+                      {isEdit ? '保存中…' : '创建中…'}
+                    </span>
+                  )}
+                  {autoSaveStatus === 'saved' && (
+                    <>
+                      <span className="inline-block w-1.5 h-1.5 bg-tertiary-fixed" />
+                      <span className="text-tertiary-fixed">已自动保存</span>
+                    </>
+                  )}
+                </span>
+              )}
 
-            {/* 反链面板（编辑模式） */}
-            {isEdit && (
-              <div className="border border-outline-variant bg-surface-container-lowest p-4">
-                <div className="font-mono text-label-mono text-on-surface-variant uppercase tracking-widest mb-3 flex items-center gap-2">
-                  <Link2 size={12} />
-                  反链 · {backlinks?.length || 0}
-                </div>
-                {backlinks && backlinks.length > 0 ? (
-                  <div className="space-y-1.5">
-                    {backlinks.map((link) => (
-                      <Link
-                        key={link.id}
-                        href={
-                          link.source_note_id
-                            ? `/admin/knowledge/${link.source_note_id}/edit`
-                            : '#'
-                        }
-                        className="flex items-center gap-2 text-sm hover:text-primary transition-colors"
-                      >
-                        <FileText size={12} className="text-tertiary-fixed shrink-0" />
-                        <span className="truncate">{link.source_title}</span>
-                      </Link>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="font-mono text-label-mono text-tertiary-fixed">
-                    暂无反链
-                  </p>
-                )}
-              </div>
-            )}
+              {/* META 按钮 */}
+              <button
+                ref={metaTriggerRef}
+                type="button"
+                onClick={() => setMetaDrawerVisible((v) => !v)}
+                className={`flex items-center gap-1.5 font-mono text-label-mono uppercase tracking-widest px-2.5 py-1 border transition-colors ${
+                  metaDrawerVisible
+                    ? 'border-primary text-primary bg-surface-container-high'
+                    : 'border-outline-variant text-on-surface-variant hover:text-primary hover:border-primary'
+                }`}
+              >
+                <Settings2 size={12} />
+                <span>META</span>
+              </button>
 
-            {isEdit && note?.updated_at && (
-              <div className="font-mono text-label-mono text-tertiary-fixed uppercase tracking-widest px-1">
-                UPDATED · {new Date(note.updated_at).toLocaleString('zh-CN')}
-              </div>
+              {/* 状态徽章 */}
+              <span
+                className={`font-mono text-label-mono uppercase tracking-widest px-2.5 py-1 border ${
+                  statusValue === 'published'
+                    ? 'border-tertiary-fixed text-tertiary-fixed'
+                    : statusValue === 'private'
+                    ? 'border-outline text-on-surface-variant'
+                    : 'border-outline-variant text-on-surface-variant'
+                }`}
+              >
+                {statusValue === 'published'
+                  ? 'PUBLISHED'
+                  : statusValue === 'private'
+                  ? 'PRIVATE'
+                  : 'DRAFT'}
+              </span>
+
+              {/* 主操作按钮：创建/保存 */}
+              <button
+                type="button"
+                onClick={handleSubmit}
+                disabled={submitting}
+                className="flex items-center gap-1.5 font-mono text-label-mono uppercase tracking-widest bg-primary text-on-primary px-3 py-1 hover:bg-primary-container transition-colors disabled:opacity-50"
+              >
+                {isEdit ? <Save size={12} /> : <Plus size={12} />}
+                <span>{isEdit ? '保存' : '创建'}</span>
+              </button>
+
+              {/* 元信息抽屉 */}
+              <MetaDrawer
+                visible={metaDrawerVisible}
+                onClose={() => setMetaDrawerVisible(false)}
+                form={form}
+                values={metaValues}
+                onFieldChange={handleFieldChange}
+                channels={channelsData?.items || []}
+                channelsLoading={channelsLoading}
+                templates={templates?.map((t) => ({
+                  id: t.id,
+                  name: t.name,
+                  category: t.category,
+                }))}
+                onTemplateSelect={handleTemplate}
+                isEdit={isEdit}
+                slugTouchedRef={slugTouchedRef}
+                triggerRef={metaTriggerRef}
+              />
+            </div>
+          </>
+        }
+        bottomBar={
+          <EditorStatusBar
+            wordCount={stats.wordCount}
+            readingTime={stats.readingTime}
+            outlinksCount={stats.outlinks}
+            backlinksCount={backlinksCount}
+            autoSaveStatus={autoSaveStatus}
+            isEdit={isEdit}
+          />
+        }
+      >
+        {/* ===== 写作区（占满宽度）===== */}
+        <div className="w-full px-6 lg:px-10 xl:px-14 py-6">
+          {/* Hero 标题（不通过 Form.Item 包裹，自定义绑定）*/}
+          <input
+            type="text"
+            placeholder="无标题笔记"
+            value={titleValue}
+            onChange={handleTitleChange}
+            className="w-full bg-transparent border-none outline-none font-headline text-[28px] font-semibold text-primary leading-tight tracking-tighter placeholder:text-outline-variant focus:outline-none pb-1 border-b border-transparent focus:border-outline-variant transition-colors mb-3"
+          />
+
+          {/* 标题下方元信息（日期/分类/子目录） */}
+          <div className="flex items-center gap-2 font-mono text-label-mono text-on-surface-variant uppercase tracking-widest mb-6">
+            <span>
+              {isEdit && note?.updated_at
+                ? new Date(note.updated_at).toLocaleDateString('zh-CN')
+                : new Date().toLocaleDateString('zh-CN')}
+            </span>
+            <span className="w-1 h-1 bg-outline-variant" />
+            <span>{categoryLabel}</span>
+            {folderPathValue && (
+              <>
+                <span className="w-1 h-1 bg-outline-variant" />
+                <span className="text-tertiary-fixed">{folderPathValue}</span>
+              </>
+            )}
+            {titleValue && !slugTouchedRef.current && (
+              <>
+                <span className="w-1 h-1 bg-outline-variant" />
+                <span className="text-tertiary-fixed/70">slug: {slugify(titleValue)}</span>
+              </>
             )}
           </div>
+
+          {/* 全宽编辑器（不通过 Form.Item 包裹，避免 onChange 冲突）*/}
+          <MarkdownEditor
+            value={contentMd}
+            onChange={(val) => {
+              contentMdRef.current = val;
+              setContentMd(val);
+              form.setFieldValue('content_md', val);
+              triggerAutoSave();
+            }}
+            placeholder="## 开始书写&#10;&#10;支持 [[双链]]、#标签、GFM、代码高亮、数学公式、Mermaid&#10;&#10;粘贴或拖拽图片自动上传"
+            enableWikilink
+            searchNotes={searchNotes}
+            excludeNoteId={note?.id}
+            mode={editorMode}
+            onModeChange={setEditorMode}
+          />
         </div>
+      </EditorShell>
 
-        <button type="submit" className="hidden" aria-hidden />
-      </Form>
-    </div>
-  );
-}
-
-function fieldLabel(text: string) {
-  return (
-    <span className="font-mono text-label-mono text-on-surface-variant uppercase tracking-widest">
-      {text}
-    </span>
+      <button type="submit" className="hidden" aria-hidden />
+    </Form>
   );
 }

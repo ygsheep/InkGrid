@@ -40,7 +40,10 @@ request.interceptors.response.use(
     if (env && typeof env === 'object' && 'code' in env) {
       if (env.code === 0) return env.data as unknown as never;
       // envelope 层业务错误（含 4010 等）
-      if (env.code === 4010) redirectToLogin();
+      // /auth/me 的 4010 不立即跳转，交给 React Query 重试，避免瞬时抖动踢人
+      if (env.code === 4010 && !isAuthMeRequest(res?.config)) {
+        redirectToLogin();
+      }
       return Promise.reject(new Error(env.message || '业务错误'));
     }
     return res.data as unknown as never;
@@ -48,13 +51,25 @@ request.interceptors.response.use(
   (error) => {
     const status = error?.response?.status;
     // HTTP 401：cookie 失效或未登录，跳登录页（避免在 /login 自身死循环）
-    if (status === 401 && typeof window !== 'undefined') {
+    // 但 /auth/me 的 401 不立即跳转：交给 React Query retry 一次，
+    // 重试仍失败再由 useMe 的 onError 触发跳转，避免偶发 401 误伤。
+    if (
+      status === 401 &&
+      typeof window !== 'undefined' &&
+      !isAuthMeRequest(error?.config)
+    ) {
       redirectToLogin();
     }
     const msg = error?.response?.data?.message || error.message || '请求失败';
     return Promise.reject(new Error(msg));
   },
 );
+
+/** 判断请求是否打到 /auth/me（用于 401 容错，不立即跳转） */
+function isAuthMeRequest(config: unknown): boolean {
+  const url = (config as { url?: string } | undefined)?.url || '';
+  return url.includes('/auth/me');
+}
 
 function redirectToLogin(): void {
   if (typeof window === 'undefined') return;

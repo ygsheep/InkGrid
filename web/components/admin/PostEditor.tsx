@@ -1,10 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { App, Button, Form, Input, InputNumber, Select, Space } from 'antd';
-import { ArrowLeft, Check } from 'lucide-react';
+import { App, Form } from 'antd';
+import { ArrowLeft, Settings2, Save, Plus } from 'lucide-react';
 import {
   useAdminChannels,
   useCreatePost,
@@ -16,6 +16,11 @@ import type {
   PostUpdatePayload,
 } from '@/lib/api/admin';
 import MarkdownEditor from '@/components/editor/MarkdownEditor';
+import PostMetaDrawer, {
+  type PostMetaValues,
+} from '@/components/editor/PostMetaDrawer';
+import EditorStatusBar from '@/components/editor/EditorStatusBar';
+import EditorShell from '@/components/editor/EditorShell';
 import { slugify } from '@/lib/utils';
 
 type FormValues = {
@@ -29,24 +34,31 @@ type FormValues = {
   reading_time?: number;
 };
 
-const STATUS_OPTIONS = [
-  { label: '草稿', value: 'draft' },
-  { label: '已发布', value: 'published' },
-  { label: '已归档', value: 'archived' },
-];
-
 /** 草稿自动保存间隔(毫秒) */
 const AUTOSAVE_DELAY = 5000;
 
+/** PostMetaValues 初始值 */
+const META_VALUES_INIT: PostMetaValues = {
+  status: 'draft',
+  channel_id: undefined,
+  slug: '',
+  tags: [],
+  excerpt: '',
+  reading_time: null,
+};
+
 /**
- * 后台文章编辑器(共用新建/编辑)。
+ * 后台文章编辑器（共用新建/编辑）。
  *
- * 功能:
- * - slug 自动生成:title 变化时,若 slug 未被手动编辑过,自动从 title 生成
- * - 草稿自动保存:编辑模式下,内容变更后防抖 5s 自动保存(仅 draft 状态)
- * - Bytemd 源码 + 预览分屏,插件链与博客展示端一致
+ * 三段式布局（与 NoteEditor 一致，通过 EditorShell 共用）：
+ * - 顶部条：返回 / 面包屑 / 保存状态 / META 按钮 / 状态徽章 / 保存按钮
+ * - 写作区：占满宽度，hero 标题 + 全宽编辑器
+ * - 底部条：字数 / 阅读 / 出链
  *
- * 编辑模式传入 post 时,会预填表单。
+ * 功能：
+ * - slug 自动生成：title 变化时，若 slug 未被手动编辑过，自动从 title 生成
+ * - 草稿自动保存：编辑模式下，内容变更后防抖 5s 自动保存（仅 draft 状态）
+ * - META 抽屉：状态/频道/Slug/标签/阅读时长/摘要 收进浮层
  */
 export default function PostEditor({ post }: { post?: AdminPost }) {
   const router = useRouter();
@@ -54,15 +66,36 @@ export default function PostEditor({ post }: { post?: AdminPost }) {
   const [form] = Form.useForm<FormValues>();
   const isEdit = !!post;
 
-  // slug 是否被用户手动编辑过(若否,则跟随 title 自动生成)
   const slugTouchedRef = useRef(false);
+  const metaTriggerRef = useRef<HTMLButtonElement>(null);
 
-  // 自动保存状态
+  // Refs 用于在异步回调中获取最新 state
+  const contentMdRef = useRef('');
+  const titleValueRef = useRef('');
+  const statusValueRef = useRef('draft');
+  const metaValuesRef = useRef(META_VALUES_INIT);
+
   const [autoSaveStatus, setAutoSaveStatus] = useState<
     'idle' | 'pending' | 'saving' | 'saved'
   >('idle');
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const latestValuesRef = useRef<FormValues | null>(null);
+
+  const [metaDrawerVisible, setMetaDrawerVisible] = useState(false);
+  const [editorMode, setEditorMode] = useState<'split' | 'tab' | 'preview'>('split');
+
+  // 实时内容（用于字数/出链统计）
+  const [contentMd, setContentMd] = useState('');
+  const [titleValue, setTitleValue] = useState('');
+
+  // MetaDrawer 需要的完整表单值（避免 render 阶段调 form.getFieldValue）
+  const [statusValue, setStatusValue] = useState('draft');
+  const [metaValues, setMetaValues] = useState(META_VALUES_INIT);
+
+  // 同步 refs（在 render 阶段同步，确保异步回调能读到最新值）
+  contentMdRef.current = contentMd;
+  titleValueRef.current = titleValue;
+  statusValueRef.current = statusValue;
+  metaValuesRef.current = metaValues;
 
   // 频道列表
   const { data: channelsData, isLoading: channelsLoading } = useAdminChannels({
@@ -79,7 +112,7 @@ export default function PostEditor({ post }: { post?: AdminPost }) {
 
   const updatePost = useUpdatePost({
     onSuccess: () => {
-      // 手动保存时不弹 message,由 autoSaveStatus 提示
+      // 自动保存不弹 message，由 autoSaveStatus 提示
     },
     onError: (e) => {
       message.error(e.message);
@@ -90,77 +123,121 @@ export default function PostEditor({ post }: { post?: AdminPost }) {
   // 预填表单
   useEffect(() => {
     if (!post) return;
-    slugTouchedRef.current = true; // 编辑模式不自动覆盖已有 slug
+    slugTouchedRef.current = true;
     form.setFieldsValue({
       slug: post.slug,
       title: post.title,
       excerpt: post.excerpt || undefined,
-      channel_id: post.channel_id,
+      channel_id: post.channel_id || undefined,
       tags: post.tags || [],
       content_md: post.content,
       status: post.status,
       reading_time: post.reading_time || undefined,
     });
+    setTitleValue(post.title);
+    setContentMd(post.content);
+    setStatusValue(post.status);
+    setMetaValues({
+      status: post.status,
+      channel_id: post.channel_id || undefined,
+      slug: post.slug,
+      tags: post.tags || [],
+      excerpt: post.excerpt || '',
+      reading_time: post.reading_time ?? null,
+    });
   }, [post, form]);
 
-  // title 变化时自动生成 slug(仅新建模式 或 slug 未被手动编辑时)
+  // title 变化时自动生成 slug
   const handleTitleChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const title = e.target.value;
+      titleValueRef.current = title;
+      setTitleValue(title);
       form.setFieldValue('title', title);
       if (!slugTouchedRef.current) {
-        form.setFieldValue('slug', slugify(title));
+        const slug = slugify(title);
+        form.setFieldValue('slug', slug);
+        setMetaValues((m) => ({ ...m, slug }));
       }
     },
     [form],
   );
 
-  // slug 字段被手动编辑时,标记 touched
-  const handleSlugChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      slugTouchedRef.current = true;
-      form.setFieldValue('slug', e.target.value);
-    },
-    [form],
-  );
+  /** 统一字段变化处理：Form.onValuesChange 和 PostMetaDrawer.onFieldChange 共用 */
+  const handleFieldChange = useCallback((field: string, value: unknown) => {
+    switch (field) {
+      case 'status':
+        setStatusValue((value as string) || 'draft');
+        setMetaValues((m) => ({ ...m, status: (value as string) || 'draft' }));
+        break;
+      case 'channel_id':
+        setMetaValues((m) => ({ ...m, channel_id: value as string | undefined }));
+        break;
+      case 'slug':
+        setMetaValues((m) => ({ ...m, slug: (value as string) || '' }));
+        break;
+      case 'tags':
+        setMetaValues((m) => ({ ...m, tags: (value as string[]) || [] }));
+        break;
+      case 'excerpt':
+        setMetaValues((m) => ({ ...m, excerpt: (value as string) || '' }));
+        break;
+      case 'reading_time':
+        setMetaValues((m) => ({ ...m, reading_time: (value as number | null) ?? null }));
+        break;
+      case 'content_md':
+        setContentMd((value as string) || '');
+        break;
+      case 'title':
+        setTitleValue((value as string) || '');
+        break;
+    }
+  }, []);
 
-  // 草稿自动保存:监听表单变化,防抖 5s 后保存
-  const triggerAutoSave = useCallback(
-    (values: FormValues) => {
-      if (!isEdit || !post) return;
-      if (values.status !== 'draft') return; // 仅草稿自动保存
-      if (autoSaveStatus === 'saving') return;
-
-      latestValuesRef.current = values;
-      setAutoSaveStatus('pending');
-
-      if (autoSaveTimerRef.current) {
-        clearTimeout(autoSaveTimerRef.current);
+  const onValuesChangeHandler = useCallback(
+    (changed: Partial<FormValues>, _allValues: FormValues) => {
+      for (const field of Object.keys(changed) as (keyof FormValues)[]) {
+        handleFieldChange(field, changed[field]);
       }
-      autoSaveTimerRef.current = setTimeout(async () => {
-        const v = latestValuesRef.current;
-        if (!v || !post) return;
-        setAutoSaveStatus('saving');
-        const payload: PostUpdatePayload = {
-          slug: v.slug,
-          title: v.title,
-          excerpt: v.excerpt || null,
-          channel_id: v.channel_id,
-          tags: v.tags?.length ? v.tags : null,
-          content_md: v.content_md,
-          status: v.status,
-          reading_time: v.reading_time || null,
-        };
-        try {
-          await updatePost.mutateAsync({ id: post.id, payload });
-          setAutoSaveStatus('saved');
-        } catch {
-          setAutoSaveStatus('idle');
-        }
-      }, AUTOSAVE_DELAY);
     },
-    [isEdit, post, autoSaveStatus, updatePost],
+    [handleFieldChange],
   );
+
+  // 草稿自动保存（从 ref 读取最新 state，避免闭包陷阱）
+  const triggerAutoSave = useCallback(() => {
+    if (autoSaveStatus === 'saving') return;
+    if (!isEdit || !post) return;
+    if (statusValueRef.current !== 'draft') return; // 仅草稿自动保存
+
+    setAutoSaveStatus('pending');
+
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+    }
+    autoSaveTimerRef.current = setTimeout(async () => {
+      if (!post) return;
+      setAutoSaveStatus('saving');
+      const mv = metaValuesRef.current;
+      // channel_id 仅在有效 UUID 时传入，避免发送 "None" / 空字符串等非法值
+      const channelId = mv.channel_id || post.channel_id || undefined;
+      const payload: PostUpdatePayload = {
+        slug: mv.slug || slugify(titleValueRef.current) || post.slug,
+        title: titleValueRef.current || post.title,
+        excerpt: mv.excerpt || null,
+        ...(channelId ? { channel_id: channelId } : {}),
+        tags: mv.tags?.length ? mv.tags : null,
+        content_md: contentMdRef.current,
+        status: mv.status,
+        reading_time: mv.reading_time ?? null,
+      };
+      try {
+        await updatePost.mutateAsync({ id: post.id, payload });
+        setAutoSaveStatus('saved');
+      } catch {
+        setAutoSaveStatus('idle');
+      }
+    }, AUTOSAVE_DELAY);
+  }, [isEdit, post, autoSaveStatus, updatePost]);
 
   // 清理定时器
   useEffect(() => {
@@ -171,22 +248,40 @@ export default function PostEditor({ post }: { post?: AdminPost }) {
     };
   }, []);
 
-  const onFinish = (values: FormValues) => {
-    // 提交前取消未执行的自动保存
+  const submitting = createPost.isPending || updatePost.isPending;
+
+  // 提交：直接调用 mutation（用 state 构造 payload）
+  const handleSubmit = useCallback(() => {
+    if (statusValue === 'published' && !metaValues.channel_id) {
+      message.error('发布文章必须选择频道（在 META 面板中设置）');
+      setMetaDrawerVisible(true);
+      return;
+    }
+
+    // 取消未执行的自动保存
     if (autoSaveTimerRef.current) {
       clearTimeout(autoSaveTimerRef.current);
     }
-    const tags = values.tags?.length ? values.tags : null;
+
+    const mv = metaValues;
+    const title = titleValue || post?.title || '无标题文章';
+    const slug = slugTouchedRef.current
+      ? mv.slug || slugify(title)
+      : slugify(title);
+    const tags = mv.tags?.length ? mv.tags : null;
+    // channel_id 仅在有效 UUID 时传入，避免发送 "None" / 空字符串等非法值
+    const channelId = mv.channel_id || post?.channel_id || undefined;
+
     if (isEdit && post) {
       const payload: PostUpdatePayload = {
-        slug: values.slug,
-        title: values.title,
-        excerpt: values.excerpt || null,
-        channel_id: values.channel_id,
+        slug,
+        title,
+        excerpt: mv.excerpt || null,
+        ...(channelId ? { channel_id: channelId } : {}),
         tags,
-        content_md: values.content_md,
-        status: values.status,
-        reading_time: values.reading_time || null,
+        content_md: contentMd,
+        status: mv.status,
+        reading_time: mv.reading_time ?? null,
       };
       updatePost.mutate(
         { id: post.id, payload },
@@ -199,236 +294,207 @@ export default function PostEditor({ post }: { post?: AdminPost }) {
       );
     } else {
       const payload: PostCreatePayload = {
-        slug: values.slug,
-        title: values.title,
-        excerpt: values.excerpt || null,
-        channel_id: values.channel_id,
+        slug,
+        title,
+        excerpt: mv.excerpt || null,
+        channel_id: channelId || '',
         tags,
-        content_md: values.content_md,
-        status: values.status,
-        reading_time: values.reading_time || null,
+        content_md: contentMd,
+        status: mv.status || 'draft',
+        reading_time: mv.reading_time ?? null,
       };
       createPost.mutate(payload);
     }
+  }, [statusValue, metaValues, message, isEdit, post, contentMd, titleValue,
+      createPost, updatePost]);
+
+  // ===== 实时统计 =====
+  const stats = useMemo(() => {
+    const text = contentMd || '';
+    const cjk = (text.match(/[\u4e00-\u9fff]/g) || []).length;
+    const en = (text.match(/[a-zA-Z]+/g) || []).length;
+    const wordCount = cjk + en;
+    const readingTime = Math.max(1, Math.ceil(cjk / 300 + en / 200));
+    const outlinks = (text.match(/(?<!!)\[\[[^\]]+\]\]/g) || []).length;
+    return { wordCount, readingTime, outlinks };
+  }, [contentMd]);
+
+  const onFinish = (_values: FormValues) => {
+    // 保留 form.submit() 入口，但实际逻辑由 handleSubmit 直接处理
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+    }
   };
 
-  const submitting = createPost.isPending || updatePost.isPending;
-
   return (
-    <div>
-      <div className="flex items-center justify-between gap-4 mb-6">
-        <div className="flex items-center gap-3">
-          <Link href="/admin/posts">
-            <Button type="text" icon={<ArrowLeft size={16} />} />
-          </Link>
-          <div>
-            <h1 className="font-headline text-headline-md text-primary uppercase tracking-tighter">
-              {isEdit ? '编辑文章' : '写文章'}
-            </h1>
-            <p className="font-mono text-label-mono text-on-surface-variant mt-1 uppercase tracking-widest">
-              {isEdit ? `EDIT · ${post?.slug}` : 'NEW'}
-            </p>
-          </div>
-        </div>
-        <Space>
-          {/* 草稿自动保存状态指示 */}
-          {isEdit && autoSaveStatus !== 'idle' && (
-            <span className="font-mono text-label-mono text-on-surface-variant uppercase tracking-widest flex items-center gap-1">
-              {autoSaveStatus === 'pending' && <span className="text-tertiary-fixed">编辑中…</span>}
-              {autoSaveStatus === 'saving' && <span className="text-tertiary-fixed">保存中…</span>}
-              {autoSaveStatus === 'saved' && (
-                <>
-                  <Check size={12} className="text-primary" />
-                  <span className="text-primary">已自动保存</span>
-                </>
+    <Form<FormValues>
+      form={form}
+      layout="vertical"
+      onFinish={onFinish}
+      onValuesChange={onValuesChangeHandler}
+      initialValues={{
+        status: 'draft',
+      }}
+      requiredMark={false}
+    >
+      <EditorShell
+        topBar={
+          <>
+            {/* ===== 左侧：返回 + 面包屑 ===== */}
+            <div className="flex items-center gap-3">
+              <Link
+                href="/admin/posts"
+                className="text-on-surface-variant hover:text-primary transition-colors"
+              >
+                <ArrowLeft size={16} />
+              </Link>
+              <span className="font-mono text-label-mono text-on-surface-variant uppercase tracking-widest">
+                文章
+                <span className="text-outline-variant mx-1">/</span>
+                <span className="text-on-surface">
+                  {isEdit ? post?.slug : '写文章'}
+                </span>
+              </span>
+            </div>
+
+            {/* ===== 右侧：保存状态 / META / 状态徽章 / 主操作 ===== */}
+            <div className="relative flex items-center gap-3">
+              {/* 保存状态 */}
+              {isEdit && autoSaveStatus !== 'idle' && (
+                <span className="font-mono text-label-mono uppercase tracking-widest flex items-center gap-1">
+                  {autoSaveStatus === 'pending' && (
+                    <span className="text-tertiary-fixed">编辑中…</span>
+                  )}
+                  {autoSaveStatus === 'saving' && (
+                    <span className="text-tertiary-fixed">保存中…</span>
+                  )}
+                  {autoSaveStatus === 'saved' && (
+                    <>
+                      <span className="inline-block w-1.5 h-1.5 bg-tertiary-fixed" />
+                      <span className="text-tertiary-fixed">已自动保存</span>
+                    </>
+                  )}
+                </span>
               )}
-            </span>
-          )}
-          <Link href="/admin/posts">
-            <Button>取消</Button>
-          </Link>
-          <Button
-            type="primary"
-            onClick={() => form.submit()}
-            loading={submitting}
-          >
-            {isEdit ? '保存' : '创建'}
-          </Button>
-        </Space>
-      </div>
 
-      <Form<FormValues>
-        form={form}
-        layout="vertical"
-        onFinish={onFinish}
-        onValuesChange={(_, allValues) => triggerAutoSave(allValues)}
-        initialValues={{
-          status: 'draft',
-        }}
-        requiredMark={false}
+              {/* META 按钮 */}
+              <button
+                ref={metaTriggerRef}
+                type="button"
+                onClick={() => setMetaDrawerVisible((v) => !v)}
+                className={`flex items-center gap-1.5 font-mono text-label-mono uppercase tracking-widest px-2.5 py-1 border transition-colors ${
+                  metaDrawerVisible
+                    ? 'border-primary text-primary bg-surface-container-high'
+                    : 'border-outline-variant text-on-surface-variant hover:text-primary hover:border-primary'
+                }`}
+              >
+                <Settings2 size={12} />
+                <span>META</span>
+              </button>
+
+              {/* 状态徽章 */}
+              <span
+                className={`font-mono text-label-mono uppercase tracking-widest px-2.5 py-1 border ${
+                  statusValue === 'published'
+                    ? 'border-tertiary-fixed text-tertiary-fixed'
+                    : statusValue === 'archived'
+                    ? 'border-outline text-on-surface-variant'
+                    : 'border-outline-variant text-on-surface-variant'
+                }`}
+              >
+                {statusValue === 'published'
+                  ? 'PUBLISHED'
+                  : statusValue === 'archived'
+                  ? 'ARCHIVED'
+                  : 'DRAFT'}
+              </span>
+
+              {/* 主操作按钮：创建/保存 */}
+              <button
+                type="button"
+                onClick={handleSubmit}
+                disabled={submitting}
+                className="flex items-center gap-1.5 font-mono text-label-mono uppercase tracking-widest bg-primary text-on-primary px-3 py-1 hover:bg-primary-container transition-colors disabled:opacity-50"
+              >
+                {isEdit ? <Save size={12} /> : <Plus size={12} />}
+                <span>{isEdit ? '保存' : '创建'}</span>
+              </button>
+
+              {/* 元信息抽屉 */}
+              <PostMetaDrawer
+                visible={metaDrawerVisible}
+                onClose={() => setMetaDrawerVisible(false)}
+                form={form}
+                values={metaValues}
+                onFieldChange={handleFieldChange}
+                channels={channelsData?.items || []}
+                channelsLoading={channelsLoading}
+                isEdit={isEdit}
+                slugTouchedRef={slugTouchedRef}
+                triggerRef={metaTriggerRef}
+              />
+            </div>
+          </>
+        }
+        bottomBar={
+          <EditorStatusBar
+            wordCount={stats.wordCount}
+            readingTime={stats.readingTime}
+            outlinksCount={stats.outlinks}
+            backlinksCount={0}
+            autoSaveStatus={autoSaveStatus}
+            isEdit={isEdit}
+          />
+        }
       >
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-6">
-          {/* 主区:标题 + 正文 */}
-          <div className="space-y-4">
-            <Form.Item
-              name="title"
-              label={fieldLabel('标题')}
-              rules={[{ required: true, message: '请输入标题' }]}
-            >
-              <Input
-                size="large"
-                placeholder="文章标题"
-                onChange={handleTitleChange}
-              />
-            </Form.Item>
+        {/* ===== 写作区（占满宽度）===== */}
+        <div className="w-full px-6 lg:px-10 xl:px-14 py-6">
+          {/* Hero 标题 */}
+          <input
+            type="text"
+            placeholder="文章标题"
+            value={titleValue}
+            onChange={handleTitleChange}
+            className="w-full bg-transparent border-none outline-none font-headline text-[28px] font-semibold text-primary leading-tight tracking-tighter placeholder:text-outline-variant focus:outline-none pb-1 border-b border-transparent focus:border-outline-variant transition-colors mb-3"
+          />
 
-            <Form.Item
-              name="content_md"
-              label={fieldLabel('正文(Markdown · 源码/预览分屏)')}
-              rules={[{ required: true, message: '请输入正文' }]}
-              extra={
-                <span className="font-mono text-label-mono text-tertiary-fixed uppercase tracking-widest">
-                  BYTEMD · GFM / HIGHLIGHT / MATH / MERMAID · 粘贴或拖拽图片自动上传
-                </span>
-              }
-            >
-              <MarkdownEditor placeholder="## 标题&#10;&#10;支持 GFM、代码高亮、数学公式、Mermaid 图表" />
-            </Form.Item>
-
-            <Form.Item
-              name="excerpt"
-              label={fieldLabel('摘要')}
-              extra={
-                <span className="font-mono text-label-mono text-tertiary-fixed">
-                  留空则从正文首段自动生成
-                </span>
-              }
-            >
-              <Input.TextArea
-                autoSize={{ minRows: 2, maxRows: 4 }}
-                placeholder="一行简介(留空自动生成)"
-              />
-            </Form.Item>
-          </div>
-
-          {/* 侧栏:元信息 */}
-          <div className="space-y-4">
-            <div className="border border-outline-variant bg-surface-container-lowest p-4 space-y-4">
-              <Form.Item
-                name="status"
-                label={fieldLabel('状态')}
-                rules={[{ required: true }]}
-              >
-                <Select options={STATUS_OPTIONS} />
-              </Form.Item>
-
-              <Form.Item
-                name="channel_id"
-                label={fieldLabel('频道')}
-                rules={[{ required: true, message: '请选择频道' }]}
-              >
-                <Select
-                  loading={channelsLoading}
-                  placeholder="选择频道"
-                  options={(channelsData?.items || []).map((c) => ({
-                    label: c.name,
-                    value: c.id,
-                  }))}
-                />
-              </Form.Item>
-
-              <Form.Item
-                name="slug"
-                label={fieldLabel('Slug')}
-                extra={
-                  <span className="font-mono text-label-mono text-tertiary-fixed">
-                    留空则从标题自动生成
-                  </span>
-                }
-                rules={[
-                  { required: true, message: '请输入 slug' },
-                  {
-                    pattern: /^[a-z0-9\u4e00-\u9fff-]+$/,
-                    message: '只能小写字母/数字/中文/连字符',
-                  },
-                ]}
-              >
-                <Input
-                  placeholder="url-friendly-slug"
-                  onChange={handleSlugChange}
-                />
-              </Form.Item>
-
-              <Form.Item name="tags" label={fieldLabel('标签')}>
-                <Select
-                  mode="tags"
-                  placeholder="按回车添加"
-                  tokenSeparators={[',', ' ']}
-                />
-              </Form.Item>
-
-              <Form.Item
-                name="reading_time"
-                label={fieldLabel('阅读时长(分)')}
-                extra={
-                  <span className="font-mono text-label-mono text-tertiary-fixed">
-                    留空则按字数自动计算
-                  </span>
-                }
-              >
-                <InputNumber
-                  min={0}
-                  max={300}
-                  className="w-full"
-                  placeholder="自动计算"
-                />
-              </Form.Item>
-            </div>
-
-            {/* 派生字段提示 */}
-            <div className="border border-outline-variant bg-surface-container-lowest/60 p-4 space-y-2">
-              <h4 className="font-mono text-label-mono text-on-surface-variant uppercase tracking-widest mb-2">
-                自动派生
-              </h4>
-              <div className="space-y-1.5">
-                <DeriveRow label="Slug" hint="从标题生成" />
-                <DeriveRow label="摘要" hint="从正文首段提取" />
-                <DeriveRow label="阅读时长" hint="按中英文字数估算" />
-                <DeriveRow label="目录" hint="从标题层级生成" />
-              </div>
-              <p className="font-mono text-label-mono text-tertiary-fixed mt-2">
-                未显式提供的字段将在保存时自动生成
-              </p>
-            </div>
-
-            {isEdit && post?.updated_at && (
-              <div className="font-mono text-label-mono text-tertiary-fixed uppercase tracking-widest px-1">
-                UPDATED · {new Date(post.updated_at).toLocaleString('zh-CN')}
-              </div>
+          {/* 标题下方元信息（日期/频道/slug 预览） */}
+          <div className="flex items-center gap-2 font-mono text-label-mono text-on-surface-variant uppercase tracking-widest mb-6">
+            <span>
+              {isEdit && post?.updated_at
+                ? new Date(post.updated_at).toLocaleDateString('zh-CN')
+                : new Date().toLocaleDateString('zh-CN')}
+            </span>
+            <span className="w-1 h-1 bg-outline-variant" />
+            <span>
+              {channelsData?.items?.find((c) => c.id === metaValues.channel_id)?.name ||
+                '未选择频道'}
+            </span>
+            {titleValue && !slugTouchedRef.current && (
+              <>
+                <span className="w-1 h-1 bg-outline-variant" />
+                <span className="text-tertiary-fixed/70">slug: {slugify(titleValue)}</span>
+              </>
             )}
           </div>
+
+          {/* 全宽编辑器 */}
+          <MarkdownEditor
+            value={contentMd}
+            onChange={(val) => {
+              contentMdRef.current = val;
+              setContentMd(val);
+              form.setFieldValue('content_md', val);
+              triggerAutoSave();
+            }}
+            placeholder="## 标题&#10;&#10;支持 GFM、代码高亮、数学公式、Mermaid 图表&#10;&#10;粘贴或拖拽图片自动上传"
+            mode={editorMode}
+            onModeChange={setEditorMode}
+          />
         </div>
+      </EditorShell>
 
-        {/* 提交触发:通过 form.submit() 触发,这里不需要按钮 */}
-        <button type="submit" className="hidden" aria-hidden />
-      </Form>
-    </div>
-  );
-}
-
-function DeriveRow({ label, hint }: { label: string; hint: string }) {
-  return (
-    <div className="flex items-center justify-between font-mono text-label-mono">
-      <span className="text-on-surface-variant">{label}</span>
-      <span className="text-tertiary-fixed">{hint}</span>
-    </div>
-  );
-}
-
-function fieldLabel(text: string) {
-  return (
-    <span className="font-mono text-label-mono text-on-surface-variant uppercase tracking-widest">
-      {text}
-    </span>
+      <button type="submit" className="hidden" aria-hidden />
+    </Form>
   );
 }

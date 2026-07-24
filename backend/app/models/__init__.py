@@ -5,7 +5,6 @@
   （alembic env.py 依赖 `from app.models import Base` 触发模型注册）
 """
 from app.models.admin import Admin
-from app.models.audit import AuditLog
 from app.models.base import Base, TimestampMixin
 from app.models.channel import Channel
 from app.models.chat import ChatMessage, ChatSession
@@ -22,7 +21,6 @@ __all__ = [
     "Base",
     "TimestampMixin",
     "Admin",
-    "AuditLog",
     "Channel",
     "ChatMessage",
     "ChatSession",

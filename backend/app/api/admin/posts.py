@@ -50,7 +50,7 @@ def _to_admin(p) -> ArticleAdmin:
         excerpt=p.excerpt,
         content=p.content_md,
         html=p.content_html,
-        channel_id=str(p.channel_id),
+        channel_id=str(p.channel_id) if p.channel_id else None,
         channel_slug=p.channel.slug if p.channel else None,
         channel_name=p.channel.name if p.channel else None,
         tags=p.tags or [],

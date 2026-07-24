@@ -100,8 +100,10 @@ export function useMe(opts?: UseQueryOptions<AdminInfo>) {
   return useQuery({
     queryKey: adminKeys.me,
     queryFn: () => authApi.me(),
-    // me 是隐式校验：失败（401）会被 request 拦截器跳转 /login
-    retry: 0,
+    // me 是隐式校验：401 时 request 拦截器对 /auth/me 不立即跳转，
+    // 这里 retry 1 次容错瞬时抖动；重试仍失败由调用方（AdminLayout）监听 isError 跳 /login。
+    retry: 1,
+    retryDelay: 500,
     staleTime: 60_000,
     ...opts,
   });

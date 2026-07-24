@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
@@ -16,6 +16,8 @@ import {
   X,
   Loader2,
   MessageSquareText,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useMe, useLogout } from '@/hooks/useAdmin';
@@ -32,6 +34,17 @@ const menu = [
   { href: '/admin/settings', label: '设置', icon: Settings },
 ];
 
+/** 编辑器类页面：突破 main 的 max-width 与 padding，让写作区占满宽度 */
+function isEditorPage(pathname: string | null): boolean {
+  if (!pathname) return false;
+  return (
+    pathname.startsWith('/admin/knowledge/new') ||
+    /\/admin\/knowledge\/[^/]+\/edit$/.test(pathname) ||
+    pathname.startsWith('/admin/posts/new') ||
+    /\/admin\/posts\/[^/]+\/edit$/.test(pathname)
+  );
+}
+
 /**
  * Admin layout — flat surface (no grid) to favour dense data work.
  * 1px line work, mono labels, zero radius.
@@ -45,13 +58,38 @@ export default function AdminLayout({
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
   const { message } = App.useApp();
   const siteName = (process.env.NEXT_PUBLIC_SITE_NAME || 'inkgrid.dev').toUpperCase();
 
-  // 校验当前博主身份：失败会被 request 拦截器跳 /login
-  const { data: me, isLoading } = useMe();
+  // 从 localStorage 恢复侧边栏折叠状态（避免 SSR/CSR hydration mismatch）
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem('admin:sidebar-collapsed');
+      if (stored === '1') setCollapsed(true);
+    } catch {
+      // ignore
+    }
+    setHydrated(true);
+  }, []);
+
+  // 持久化折叠状态
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      window.localStorage.setItem('admin:sidebar-collapsed', collapsed ? '1' : '0');
+    } catch {
+      // ignore
+    }
+  }, [collapsed, hydrated]);
+
+  // 校验当前博主身份：失败时由下方 useEffect 跳 /login
+  // request 拦截器对 /auth/me 的 401 不立即跳转，给 React Query retry 一次容错；
+  // 重试仍失败 → useMe 进入 isError → useEffect 触发跳转。
+  const { data: me, isLoading, isError } = useMe();
   const logout = useLogout({
     onSuccess: () => {
       message.success('已退出登录');
@@ -60,17 +98,58 @@ export default function AdminLayout({
     },
   });
 
+  // useMe 重试后仍失败（会话失效/未登录）→ 跳登录页
+  useEffect(() => {
+    if (isError && typeof window !== 'undefined') {
+      const { pathname, search } = window.location;
+      if (!pathname.startsWith('/login')) {
+        const redirect = encodeURIComponent(pathname + search);
+        window.location.href = `/login?redirect=${redirect}`;
+      }
+    }
+  }, [isError]);
+
+  const editorPage = isEditorPage(pathname);
+
   const SidebarContent = (
     <>
-      <div className="h-16 flex items-center px-5 border-b border-outline-variant">
-        <Link
-          href="/"
-          className="font-mono text-label-mono text-primary uppercase tracking-widest font-semibold"
-        >
-          {siteName} · ADMIN
-        </Link>
+      <div
+        className={cn(
+          'h-16 flex items-center border-b border-outline-variant',
+          collapsed ? 'justify-center px-2' : 'justify-between px-5',
+        )}
+      >
+        {collapsed ? (
+          <button
+            type="button"
+            onClick={() => setCollapsed(false)}
+            aria-label="展开侧边栏"
+            title="展开侧边栏"
+            className="text-on-surface-variant hover:text-primary transition-colors"
+          >
+            <PanelLeftOpen size={16} />
+          </button>
+        ) : (
+          <>
+            <Link
+              href="/"
+              className="font-mono text-label-mono text-primary uppercase tracking-widest font-semibold truncate"
+            >
+              {siteName} · ADMIN
+            </Link>
+            <button
+              type="button"
+              onClick={() => setCollapsed(true)}
+              aria-label="收起侧边栏"
+              title="收起侧边栏"
+              className="text-on-surface-variant hover:text-primary transition-colors shrink-0"
+            >
+              <PanelLeftClose size={16} />
+            </button>
+          </>
+        )}
       </div>
-      <nav className="p-3 space-y-1 flex-1">
+      <nav className={cn('space-y-1 flex-1', collapsed ? 'p-2' : 'p-3')}>
         {menu.map((m) => {
           const active = pathname === m.href;
           return (
@@ -78,22 +157,40 @@ export default function AdminLayout({
               key={m.href}
               href={m.href}
               onClick={() => setOpen(false)}
+              title={collapsed ? m.label : undefined}
               className={cn(
-                'flex items-center gap-3 px-3 py-2 text-body-sm transition-colors font-mono text-label-mono uppercase tracking-wider',
+                'flex items-center transition-colors font-mono text-label-mono uppercase tracking-wider',
+                collapsed
+                  ? 'justify-center px-2 py-2'
+                  : 'gap-3 px-3 py-2 text-body-sm',
                 active
                   ? 'bg-primary text-on-primary'
                   : 'text-on-surface-variant hover:text-primary hover:bg-surface-container-lowest',
               )}
             >
-              <m.icon size={16} />
-              <span>{m.label}</span>
+              <m.icon size={16} className="shrink-0" />
+              {!collapsed && <span>{m.label}</span>}
             </Link>
           );
         })}
       </nav>
-      <div className="p-3 border-t border-outline-variant">
-        <div className="px-3 py-2 mb-1 font-mono text-label-mono text-tertiary-fixed uppercase tracking-widest truncate">
-          {isLoading ? (
+      <div className={cn('border-t border-outline-variant', collapsed ? 'p-2' : 'p-3')}>
+        <div
+          className={cn(
+            'font-mono text-label-mono text-tertiary-fixed uppercase tracking-widest truncate',
+            collapsed ? 'px-1 py-1 text-center' : 'px-3 py-2 mb-1',
+          )}
+          title={!collapsed ? undefined : me?.username}
+        >
+          {collapsed ? (
+            isLoading ? (
+              <Loader2 size={12} className="animate-spin inline" />
+            ) : (
+              <span className="text-[10px]">
+                {(me?.username || '?').slice(0, 2)}
+              </span>
+            )
+          ) : isLoading ? (
             <span className="inline-flex items-center gap-2">
               <Loader2 size={12} className="animate-spin" />
               <span>校验中</span>
@@ -105,10 +202,16 @@ export default function AdminLayout({
         <button
           onClick={() => logout.mutate()}
           disabled={logout.isPending}
-          className="w-full flex items-center gap-3 px-3 py-2 text-body-sm font-mono text-label-mono text-on-surface-variant hover:text-error uppercase tracking-wider transition-colors disabled:opacity-50"
+          title={collapsed ? '退出' : undefined}
+          className={cn(
+            'flex items-center font-mono text-label-mono text-on-surface-variant hover:text-error uppercase tracking-wider transition-colors disabled:opacity-50',
+            collapsed
+              ? 'w-full justify-center px-2 py-2'
+              : 'w-full gap-3 px-3 py-2 text-body-sm',
+          )}
         >
-          <LogOut size={16} />
-          <span>{logout.isPending ? '退出中' : '退出'}</span>
+          <LogOut size={16} className="shrink-0" />
+          {!collapsed && <span>{logout.isPending ? '退出中' : '退出'}</span>}
         </button>
       </div>
     </>
@@ -117,7 +220,12 @@ export default function AdminLayout({
   return (
     <div className="min-h-screen bg-background flex">
       {/* Desktop sidebar */}
-      <aside className="hidden md:flex w-60 flex-col border-r border-outline-variant bg-black sticky top-0 h-screen">
+      <aside
+        className={cn(
+          'hidden md:flex flex-col border-r border-outline-variant bg-black sticky top-0 h-screen transition-[width] duration-200',
+          collapsed ? 'w-16' : 'w-60',
+        )}
+      >
         {SidebarContent}
       </aside>
 
@@ -155,7 +263,14 @@ export default function AdminLayout({
             {siteName} · ADMIN
           </span>
         </header>
-        <main className="flex-1 p-4 sm:p-6 w-full max-w-admin mx-auto">
+        <main
+          className={cn(
+            'flex-1 w-full',
+            editorPage
+              ? 'p-0 max-w-none'
+              : 'p-4 sm:p-6 max-w-admin mx-auto',
+          )}
+        >
           {children}
         </main>
       </div>

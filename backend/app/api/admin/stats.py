@@ -134,9 +134,18 @@ async def _fetch_top_articles(db) -> list[TopArticle]:
     if not article_ids:
         return []
     # 用 PostgreSQL 的 = ANY 查询
+    # 过滤非合法 UUID 字符串（citations 中可能含脏数据，如空串或非 UUID 文本）
+    valid_uuids = []
+    for a in article_ids:
+        try:
+            valid_uuids.append(UUID(a))
+        except (ValueError, AttributeError):
+            continue
+    if not valid_uuids:
+        return []
     articles_q = select(Post, Channel.name).join(
         Channel, Post.channel_id == Channel.id, isouter=True
-    ).where(Post.id.in_([UUID(a) for a in article_ids if a]))
+    ).where(Post.id.in_(valid_uuids))
     article_rows = (await db.execute(articles_q)).all()
     article_map = {str(p.id): (p, channel_name) for p, channel_name in article_rows}
     result = []

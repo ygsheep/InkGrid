@@ -22,7 +22,7 @@ export interface AdminPost {
   excerpt: string | null;
   content: string;
   html: string | null;
-  channel_id: string;
+  channel_id: string | null;
   channel_slug: string | null;
   channel_name: string | null;
   tags: string[] | null;

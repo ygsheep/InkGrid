@@ -35,14 +35,20 @@ def verify_password(plain: str, hashed: str) -> bool:
         return False
 
 
-def create_access_token(sub: str, extra: dict | None = None) -> str:
-    """签发 JWT。sub 通常是 admin_id。"""
+def create_access_token(sub: str, extra: dict | None = None, jti: str | None = None) -> str:
+    """签发 JWT。sub 通常是 admin_id。
+
+    Args:
+        jti: JWT ID，用于 Redis session 绑定。传入 None 时不写 jti（向后兼容）。
+    """
     now = datetime.now(timezone.utc)
     payload: dict[str, Any] = {
         "sub": sub,
         "iat": now,
         "exp": now + timedelta(hours=_settings.jwt_expire_hours),
     }
+    if jti:
+        payload["jti"] = jti
     if extra:
         payload.update(extra)
     return jwt.encode(payload, _settings.jwt_secret, algorithm=_settings.jwt_algorithm)
