@@ -7,10 +7,10 @@
 流程：
 1. 用 Base.metadata.create_all 创建所有表（开发期简化，生产用 alembic upgrade head）
 2. 修补已存在表的结构差异（create_all 对已存在的表不会修改列定义）
-3. 写入种子数据：默认人设、站点设置单行
+3. 写入种子数据：默认人设、站点设置单行、默认笔记模板
 4. 幂等：已存在的数据跳过
 
-注：频道由用户在后台自行创建（文章即知识库，按知识域组织频道）。
+注：频道由用户在后台自行创建（posts 表统一承载博客文章与知识库笔记）。
     博主账号请用 scripts/create_admin.py 单独创建。
 """
 import asyncio
@@ -24,11 +24,65 @@ from sqlalchemy import select, text  # noqa: E402
 
 from app.core.logging import configure_logging, get_logger  # noqa: E402
 from app.db.session import async_session_factory, engine  # noqa: E402
-from app.models import Base  # noqa: E402  触发所有模型注册到 metadata
+from app.models import Base  # noqa: E402
+from app.models.note_template import NoteTemplate  # noqa: E402
 from app.models.persona import Persona  # noqa: E402
 from app.models.settings import SiteSettings  # noqa: E402
 
 logger = get_logger("scripts.init_db")
+
+# 默认笔记模板（对应 05_Templates 目录）
+DEFAULT_TEMPLATES = [
+    {
+        "name": "日报模板",
+        "category": "daily",
+        "description": "每日复盘、待办、灵感记录",
+        "content_md": (
+            "# {{date}}\n\n"
+            "## 今日完成\n\n- \n\n"
+            "## 待办\n\n- [ ] \n\n"
+            "## 灵感与思考\n\n- \n\n"
+            "#status/进行中 #type/笔记\n"
+        ),
+    },
+    {
+        "name": "读书笔记模板",
+        "category": "reading",
+        "description": "阅读摘录与心得",
+        "content_md": (
+            "# {{book_title}}\n\n"
+            "作者：\n来源：\n\n"
+            "## 核心观点\n\n- \n\n"
+            "## 精彩摘录\n\n> \n\n"
+            "## 我的思考\n\n- \n\n"
+            "#status/待处理 #type/笔记\n"
+        ),
+    },
+    {
+        "name": "原子笔记模板",
+        "category": "knowledge",
+        "description": "单个概念的原子化知识笔记",
+        "content_md": (
+            "# {{title}}\n\n"
+            "## 定义\n\n\n"
+            "## 要点\n\n- \n\n"
+            "## 关联\n\n- [[]]\n\n"
+            "#status/进行中 #type/笔记\n"
+        ),
+    },
+    {
+        "name": "MOC 模板",
+        "category": "knowledge",
+        "description": "主题地图，聚合某领域的多篇笔记",
+        "content_md": (
+            "# MOC - {{topic}}\n\n"
+            "## 核心概念\n\n- [[]]\n\n"
+            "## 应用场景\n\n- \n\n"
+            "## 相关主题\n\n- [[]]\n\n"
+            "#type/MOC\n"
+        ),
+    },
+]
 
 
 # 已知结构修补清单：列必须为 TIMESTAMP WITH TIME ZONE。
@@ -135,7 +189,7 @@ async def create_tables() -> None:
 
 
 async def seed_data() -> None:
-    """写入种子数据：默认人设、默认频道、站点设置。"""
+    """写入种子数据：默认人设、站点设置、默认笔记模板。"""
     async with async_session_factory() as db:
         # 默认人设
         persona_exists = (
@@ -180,6 +234,19 @@ async def seed_data() -> None:
             logger.info("seed_settings_created")
         else:
             logger.info("seed_settings_exists")
+
+        # 默认笔记模板（05_Templates 目录）
+        for tpl in DEFAULT_TEMPLATES:
+            exists = (
+                await db.execute(
+                    select(NoteTemplate).where(NoteTemplate.name == tpl["name"])
+                )
+            ).scalar_one_or_none()
+            if not exists:
+                db.add(NoteTemplate(**tpl))
+                logger.info("seed_template_created", name=tpl["name"])
+            else:
+                logger.info("seed_template_exists", name=tpl["name"])
 
         await db.commit()
 

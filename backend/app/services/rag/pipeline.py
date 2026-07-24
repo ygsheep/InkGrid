@@ -1,7 +1,18 @@
-"""RAG 端到端管道编排。
+"""RAG 端到端管道编排（v2：Query Understanding + FAQ-boosted）。
 
 设计参考：plan/后端设计方案.md §6.2 / §6.7
-流程：retrieve → rerank → 阈值判定(clarify?) → agent.stream → citation 对齐 → followups
+流程：
+  0. Query Understanding（1 次 LLM 结构化输出）
+  1. 路由检索：
+     - faq_first → FAQ 检索 → 高分短路？→ 直接用 FAQ answer
+     - rag → 文章片段检索
+     - channel → 频道范围检索
+  2. rerank 精排
+  3. 阈值判定（clarify？）
+  4. 组装上下文（FAQ + 文章片段合并）
+  5. LLM 流式生成（人设模板 + 引用标注）
+  6. 引用对齐
+  7. followups（从问题库取）
 
 作为 async generator yield WS 帧 dict，WS 层遍历发送。
 支持取消：WS 层用 asyncio.Task 包装，stop/打断时 task.cancel()。
@@ -13,12 +24,20 @@ from app.core.logging import get_logger
 from app.schemas import ws as ws_constants
 from app.services.rag.agent import rag_agent
 from app.services.rag.citation import align_citations
-from app.services.rag.context_builder import build_context
+from app.services.rag.context_builder import build_context, check_faq_short_circuit
 from app.services.rag.fallback import (
     build_clarify_frame,
     build_followups,
     build_no_result_reply,
     should_clarify,
+)
+from app.services.rag.followups import fetch_followups_from_faq
+from app.services.rag.query_understanding import (
+    ROUTE_CHANNEL,
+    ROUTE_EXTERNAL,
+    ROUTE_FAQ_FIRST,
+    ROUTE_RAG,
+    analyze_query,
 )
 from app.services.rag.reranker import reranker
 from app.services.rag.retriever import retriever
@@ -33,7 +52,7 @@ async def run_rag_pipeline(
     persona_name: str = "",
     persona_system_prompt: str = "",
 ) -> AsyncGenerator[dict, None]:
-    """端到端 RAG 管道，yield WS 帧。
+    """端到端 RAG 管道（v2），yield WS 帧。
 
     Yields:
         WS 帧 dict，type 可能是: token / citation / clarify / followup / done / error
@@ -41,51 +60,86 @@ async def run_rag_pipeline(
     settings = get_settings()
 
     try:
-        # 1. 检索（稠密+稀疏混合）
-        chunks = await retriever.retrieve(
-            query=query,
-            scope_type=scope_type,
-            scope_ref=scope_ref,
+        # 0. Query Understanding（1 次 LLM 结构化输出）
+        analysis = await analyze_query(query)
+        enhanced_query = analysis.enhanced_query or query
+
+        logger.info(
+            "query_understood",
+            query=query[:50],
+            route=analysis.route,
+            keywords=analysis.keywords,
         )
 
-        # 2. 无结果 → 跳过精排，用空 context 走 LLM（LLM 兜底比固定文案体验更好）
-        if not chunks:
-            logger.info("no_results", query=query[:50], scope=f"{scope_type}:{scope_ref}")
-            context = "（无参考资料，请基于自身知识回答）"
-            ranked = []
-        else:
-            # 3. 精排
-            ranked = await reranker.rerank(
-                query=query,
-                chunks=chunks,
-                top_n=settings.reranker_top_n,
+        # 1. 路由检索
+        faq_chunks: list[dict] = []
+        article_chunks: list[dict] = []
+
+        # FAQ 检索（faq_first 和 rag 路由都搜 FAQ，短路决策在 rerank 后）
+        if analysis.route in (ROUTE_FAQ_FIRST, ROUTE_RAG):
+            faq_chunks = await retriever.retrieve_faq(
+                query=enhanced_query,
+                scope_type=scope_type,
+                scope_ref=scope_ref,
             )
 
-            # 4. 阈值判定 → 澄清
-            top_score = ranked[0].get("score", 0.0) if ranked else 0.0
-            if should_clarify(top_score):
-                logger.info(
-                    "clarify_triggered",
-                    query=query[:50],
-                    top_score=top_score,
-                    threshold=get_settings().rag_clarify_threshold,
-                )
-                # 发 clarify 帧让前端展示选项卡片
-                yield build_clarify_frame(query)
-                # 同时把引导文案作为 token 帧发出，让前端消息流有内容、chat.py 能持久化
-                clarify_text = build_clarify_frame(query)["content"]
-                yield {"type": ws_constants.TOKEN, "content": clarify_text}
-                yield {"type": ws_constants.DONE}
-                return
+        # 文章片段检索
+        if analysis.route in (ROUTE_RAG, ROUTE_CHANNEL, ROUTE_EXTERNAL):
+            article_chunks = await retriever.retrieve_articles(
+                query=enhanced_query,
+                scope_type=scope_type,
+                scope_ref=scope_ref,
+            )
+        elif analysis.route == ROUTE_FAQ_FIRST and not faq_chunks:
+            # faq_first 但 FAQ 无结果 → 回退到文章检索
+            article_chunks = await retriever.retrieve_articles(
+                query=enhanced_query,
+                scope_type=scope_type,
+                scope_ref=scope_ref,
+            )
 
-            # 5. 组装上下文
-            context = build_context(ranked)
+        # 合并所有 chunks
+        all_chunks = faq_chunks + article_chunks
 
-        # 6. LLM 流式生成（标注 [n]）
-        # reasoning 模型会先输出思考过程（reasoning 帧），再输出正式回答（token 帧）
+        # 2. 无结果兜底
+        if not all_chunks:
+            logger.info("no_results", query=query[:50], scope=f"{scope_type}:{scope_ref}")
+            yield {"type": ws_constants.TOKEN, "content": build_no_result_reply()}
+            yield {
+                "type": ws_constants.FOLLOWUP,
+                "questions": build_followups(query, ""),
+            }
+            yield {"type": ws_constants.DONE}
+            return
+
+        # 3. 精排（FAQ + 文章片段一起 rerank）
+        ranked = await reranker.rerank(
+            query=enhanced_query,
+            chunks=all_chunks,
+            top_n=settings.reranker_top_n,
+        )
+
+        # 4. 阈值判定 → 澄清
+        top_score = ranked[0].get("score", 0.0) if ranked else 0.0
+        if should_clarify(top_score):
+            logger.info(
+                "clarify_triggered",
+                query=query[:50],
+                top_score=top_score,
+            )
+            yield build_clarify_frame(query)
+            yield {"type": ws_constants.DONE}
+            return
+
+        # 5. FAQ 短路检查
+        faq_hit = check_faq_short_circuit(ranked)
+
+        # 6. 组装上下文
+        context = build_context(ranked)
+
+        # 7. LLM 流式生成（标注 [n]）
         answer_parts: list[str] = []
-        reasoning_parts: list[str] = []  # 收集思考过程，用于 content 为空时的诊断
-        async for kind, delta in rag_agent.stream_answer(
+        async for token in rag_agent.stream_answer(
             query=query,
             context=context,
             persona_name=persona_name,
@@ -93,62 +147,46 @@ async def run_rag_pipeline(
             scope_type=scope_type,
             scope_ref=scope_ref,
         ):
-            if kind == "reasoning":
-                reasoning_parts.append(delta)
-                yield {"type": ws_constants.REASONING, "content": delta}
-            else:
-                yield {"type": ws_constants.TOKEN, "content": delta}
-                answer_parts.append(delta)
+            yield {"type": ws_constants.TOKEN, "content": token}
+            answer_parts.append(token)
 
         answer = "".join(answer_parts)
 
-        # 诊断：思考模型只输出了 reasoning 没有 content（思考占满 max_tokens）
-        if not answer and reasoning_parts:
-            reasoning_len = sum(len(p) for p in reasoning_parts)
-            logger.error(
-                "reasoning_exhausted_tokens",
-                query=query[:50],
-                reasoning_chars=reasoning_len,
-                hint="思考过程占满 max_tokens 导致正式回答为空，请增大 llm_max_tokens 或缩短上下文",
-            )
-            yield {
-                "type": ws_constants.ERROR,
-                "code": ws_constants.ERR_INTERNAL,
-                "message": "模型思考过程过长，未能生成正式回答。请在设置中增大 max_tokens 或换用非思考模型。",
-            }
-            yield {"type": ws_constants.DONE}
-            return
-
-        # 7. 引用对齐
+        # 8. 引用对齐
         citations = align_citations(answer, ranked)
         if citations:
             yield {"type": ws_constants.CITATION, "data": citations}
 
-        # 8. 推荐追问
-        followups = build_followups(query, answer)
+        # 9. 推荐追问（从问题库取）
+        followups = await fetch_followups_from_faq(
+            query=analysis.enhanced_query or query,
+            scope_type=scope_type,
+            scope_ref=scope_ref,
+            exclude_ids=[c["articleId"] for c in citations] if citations else [],
+        )
+        # 无 FAQ 匹配时回退到模板
+        if not followups:
+            followups = build_followups(query, answer)
         yield {"type": ws_constants.FOLLOWUP, "questions": followups}
 
-        # 9. 完成
+        # 10. 完成
         yield {"type": ws_constants.DONE}
 
         logger.info(
             "pipeline_done",
             query=query[:50],
             scope=f"{scope_type}:{scope_ref}",
-            chunks=len(chunks),
+            route=analysis.route,
+            faq_chunks=len(faq_chunks),
+            article_chunks=len(article_chunks),
             ranked=len(ranked),
             citations=len(citations),
+            faq_short_circuit=faq_hit is not None,
             answer_len=len(answer),
         )
 
     except Exception as e:
-        logger.exception(
-            "pipeline_error",
-            query=query[:50],
-            scope=f"{scope_type}:{scope_ref}",
-            error=str(e),
-            error_type=type(e).__name__,
-        )
+        logger.exception("pipeline_error", query=query[:50], error=str(e))
         yield {
             "type": ws_constants.ERROR,
             "code": ws_constants.ERR_INTERNAL,
@@ -169,29 +207,42 @@ async def run_rag_pipeline_simple(
     """
     settings = get_settings()
 
-    chunks = await retriever.retrieve(query, scope_type, scope_ref)
-    if not chunks:
+    # Query Understanding
+    analysis = await analyze_query(query)
+    enhanced_query = analysis.enhanced_query or query
+
+    # 检索
+    faq_chunks = await retriever.retrieve_faq(enhanced_query, scope_type, scope_ref)
+    article_chunks = await retriever.retrieve_articles(enhanced_query, scope_type, scope_ref)
+    all_chunks = faq_chunks + article_chunks
+
+    if not all_chunks:
         return build_no_result_reply(), [], build_followups(query, "")
 
-    ranked = await reranker.rerank(query, chunks, top_n=settings.reranker_top_n)
+    ranked = await reranker.rerank(enhanced_query, all_chunks, top_n=settings.reranker_top_n)
 
     top_score = ranked[0].get("score", 0.0) if ranked else 0.0
     # 非流式模式不做 clarify（语音场景直接回答）
     context = build_context(ranked)
 
     answer_parts: list[str] = []
-    async for kind, delta in rag_agent.stream_answer(
+    async for token in rag_agent.stream_answer(
         query=query,
         context=context,
         scope_type=scope_type,
         scope_ref=scope_ref,
     ):
-        # 非流式版只收集正式回答，丢弃 reasoning（语音场景无需思考过程）
-        if kind == "content":
-            answer_parts.append(delta)
+        answer_parts.append(token)
     answer = "".join(answer_parts)
 
     citations = align_citations(answer, ranked)
-    followups = build_followups(query, answer)
+    followups = await fetch_followups_from_faq(
+        query=enhanced_query,
+        scope_type=scope_type,
+        scope_ref=scope_ref,
+        exclude_ids=[c["articleId"] for c in citations] if citations else [],
+    )
+    if not followups:
+        followups = build_followups(query, answer)
 
     return answer, citations, followups

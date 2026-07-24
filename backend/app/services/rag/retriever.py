@@ -1,11 +1,13 @@
-"""范围路由 + BGE-M3 稠密/稀疏混合检索。
+"""范围路由 + BGE-M3 稠密/稀疏混合检索 + FAQ-boosted。
 
 设计参考：plan/后端设计方案.md §6.1
 - global → 搜全 collection（所有 partition）
 - channel:xxx → partition=[channel_xxx]
 - article:xxx → filter: article_slug == xxx（跨所有 partition 搜）
+- FAQ-boosted: 先搜 chunk_type=qa 的 Q&A，高分命中可短路
 """
 from app.core.logging import get_logger
+from app.db.milvus import CHUNK_TYPE_ARTICLE, CHUNK_TYPE_QA
 from app.db.milvus import milvus_store
 from app.ingest.embedder import embedder
 
@@ -15,9 +17,12 @@ logger = get_logger("rag.retriever")
 DEFAULT_TOP_K_DENSE = 20
 DEFAULT_TOP_K_SPARSE = 20
 
+# FAQ 短路阈值（rerank 分数高于此值时直接用 FAQ 答案）
+FAQ_SHORT_CIRCUIT_THRESHOLD = 0.8
+
 
 class Retriever:
-    """范围路由 + 混合检索。"""
+    """范围路由 + 混合检索 + FAQ-boosted。"""
 
     async def retrieve(
         self,
@@ -26,17 +31,18 @@ class Retriever:
         scope_ref: str = "",
         top_k: int = DEFAULT_TOP_K_DENSE,
     ) -> list[dict]:
-        """范围路由 + 稠密/稀疏混合检索。
+        """范围路由 + 稠密/稀疏混合检索（全部 chunk 类型）。
 
         Args:
-            query: 用户问题
+            query: 用户问题（已增强的 query）
             scope_type: global | channel | article
             scope_ref: channel slug 或 article slug
             top_k: 每路检索的 top_k
 
         Returns:
             合并去重后的 chunks 列表（未 rerank），每个含:
-            id, doc_id, channel, article_slug, heading, tags, content, score
+            id, doc_id, channel, article_slug, heading, tags, content,
+            chunk_type, answer, score
         """
         # 1. query embedding
         query_dense, query_sparse = await embedder.embed_query(query)
@@ -77,6 +83,88 @@ class Retriever:
             scope=f"{scope_type}:{scope_ref}",
             dense=len(dense_results),
             sparse=len(sparse_results),
+            merged=len(merged),
+        )
+        return merged
+
+    async def retrieve_faq(
+        self,
+        query: str,
+        scope_type: str = "global",
+        scope_ref: str = "",
+        top_k: int = 10,
+    ) -> list[dict]:
+        """只搜 Q&A 类型（chunk_type=qa）的 chunks。
+
+        Returns:
+            FAQ chunks 列表，每个含 answer 字段
+        """
+        query_dense, query_sparse = await embedder.embed_query(query)
+        partition_names, filter_expr = self._resolve_scope(scope_type, scope_ref)
+
+        # 叠加 chunk_type == "qa" 过滤
+        faq_filter = 'chunk_type == "qa"'
+        if filter_expr:
+            filter_expr = f"({filter_expr}) and {faq_filter}"
+        else:
+            filter_expr = faq_filter
+
+        dense_results = await milvus_store.search_dense(
+            query_dense=query_dense,
+            partition_names=partition_names,
+            filter_expr=filter_expr,
+            top_k=top_k,
+        )
+        logger.info(
+            "faq_retrieve_done",
+            query=query[:50],
+            scope=f"{scope_type}:{scope_ref}",
+            hits=len(dense_results),
+        )
+        return dense_results
+
+    async def retrieve_articles(
+        self,
+        query: str,
+        scope_type: str = "global",
+        scope_ref: str = "",
+        top_k: int = DEFAULT_TOP_K_DENSE,
+    ) -> list[dict]:
+        """只搜文章片段类型（chunk_type=article_chunk）的 chunks。"""
+        query_dense, query_sparse = await embedder.embed_query(query)
+        partition_names, filter_expr = self._resolve_scope(scope_type, scope_ref)
+
+        # 叠加 chunk_type == "article_chunk" 过滤
+        art_filter = 'chunk_type == "article_chunk"'
+        if filter_expr:
+            filter_expr = f"({filter_expr}) and {art_filter}"
+        else:
+            filter_expr = art_filter
+
+        dense_results = await milvus_store.search_dense(
+            query_dense=query_dense,
+            partition_names=partition_names,
+            filter_expr=filter_expr,
+            top_k=top_k,
+        )
+
+        sparse_results = await milvus_store.search_sparse(
+            query_sparse=query_sparse,
+            partition_names=partition_names,
+            top_k=DEFAULT_TOP_K_SPARSE,
+        )
+
+        # 过滤掉非 article_chunk 的稀疏结果（sparse 搜索无法加 filter）
+        sparse_results = [
+            r for r in sparse_results
+            if r.get("chunk_type", CHUNK_TYPE_ARTICLE) == CHUNK_TYPE_ARTICLE
+        ]
+
+        merged = self._merge_dedupe(dense_results, sparse_results)
+        logger.info(
+            "article_retrieve_done",
+            query=query[:50],
+            scope=f"{scope_type}:{scope_ref}",
             merged=len(merged),
         )
         return merged

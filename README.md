@@ -94,6 +94,98 @@ InkGrid/
 
 🚧 **骨架阶段（P0）** —— 前端基础架构已搭建，使用 mock 数据；后端与 AI 链路待接入。
 
+## Docker 部署
+
+> 以下步骤按依赖顺序执行，所有命令在 `backend/` 目录下运行。
+> 国内网络需先配置 Docker 镜像加速，详见下方说明。
+
+### 0. 前置：配置镜像加速（国内网络）
+
+编辑 Docker Desktop → Settings → Docker Engine → `registry-mirrors`，添加可用源：
+
+```json
+{
+  "registry-mirrors": [
+    "https://docker.xuanyuan.me",
+    "https://docker.1ms.run"
+  ]
+}
+```
+
+Apply & Restart。如果仍无法拉取，请在 Docker Desktop → Resources → Proxies 配置 HTTP 代理。
+
+### 1. 基础搭建
+
+启动 PostgreSQL、Redis、MinIO 等基础设施：
+
+```bash
+cd backend
+docker compose -f docker/docker-compose.dev.yml up -d postgres redis minio
+# 等所有服务 healthy 后继续下一步
+docker compose -f docker/docker-compose.dev.yml ps
+```
+
+需要完整 RAG 栈（含 Milvus、TEI 等）则：
+
+```bash
+docker compose -f docker/docker-compose.dev.yml up -d
+```
+
+首次部署需先下载 Embedding 模型（约 6.4GB）：
+
+```bash
+python scripts/download_models.py
+```
+
+### 2. 任务队列
+
+启动 Celery Worker（入库/采集任务）和 Celery Beat（定时任务）：
+
+```bash
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up -d worker beat
+```
+
+### 3. 后端 Web
+
+启动 FastAPI 后端：
+
+```bash
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up -d web
+```
+
+### 4. 环境变量 & 初始化
+
+```bash
+cd backend
+cp .env.example .env
+# 按需修改 DATABASE_URL、REDIS_URL、MINIO_* 等
+
+# 建表 + 种子数据
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml exec web python scripts/init_db.py
+
+# 创建管理员账号
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml exec web python scripts/create_admin.py admin yourpassword
+```
+
+### 5. 验证
+
+```bash
+curl http://localhost:8000/health
+# 浏览器打开 http://localhost:8000/docs
+```
+
+### 停止与清理
+
+```bash
+# 停止所有服务（保留数据）
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml down
+docker compose -f docker/docker-compose.dev.yml down
+
+# 停止并删除数据卷（彻底重置）
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml down -v
+docker compose -f docker/docker-compose.dev.yml down -v
+```
+
 ## License
 
 [MIT](./LICENSE) © 2026 牧羊人

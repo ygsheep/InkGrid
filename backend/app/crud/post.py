@@ -26,14 +26,21 @@ class CRUDPost(CRUDBase[Post, PostCreate, PostUpdate]):
         *,
         only_published: bool = False,
     ) -> Post | None:
-        """按 slug 取文章（含 channel）。"""
+        """按 slug 取文章（含 channel）。
+
+        only_published=True 时额外要求 channel_id 非空：
+        无 channel 的 published 笔记（如 inbox/daily）不进博客公开端。
+        """
         stmt = (
             select(Post)
             .options(selectinload(Post.channel))
             .where(Post.slug == slug)
         )
         if only_published:
-            stmt = stmt.where(Post.status == "published")
+            stmt = stmt.where(
+                Post.status == "published",
+                Post.channel_id.isnot(None),
+            )
         result = await db.execute(stmt)
         return result.scalar_one_or_none()
 
@@ -61,20 +68,27 @@ class CRUDPost(CRUDBase[Post, PostCreate, PostUpdate]):
         offset: int = 0,
         limit: int = 20,
     ) -> tuple[list[Post], int]:
-        """公开文章列表：仅 published，按 published_at desc。
+        """公开文章列表：仅 published 且有 channel，按 published_at desc。
 
         - channel: 频道 slug
         - tag: 任意 tag 命中
         - q: title/excerpt 模糊匹配
         返回 (items, total)
+
+        要求 channel_id 非空：无 channel 的 published 笔记（如 inbox/daily
+        等私有分类）不进博客公开端，避免泄漏与 UI 破相。
         """
+        published_cond = (
+            Post.status == "published",
+            Post.channel_id.isnot(None),
+        )
         stmt = (
             select(Post)
             .options(selectinload(Post.channel))
-            .where(Post.status == "published")
+            .where(*published_cond)
         )
         count_stmt = select(func.count()).select_from(Post).where(
-            Post.status == "published"
+            *published_cond
         )
         if channel:
             stmt = stmt.join(Channel).where(Channel.slug == channel)

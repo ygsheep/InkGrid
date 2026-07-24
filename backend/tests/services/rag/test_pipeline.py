@@ -1,6 +1,6 @@
-"""测试 services/rag/pipeline.py：端到端 RAG 管道编排。
+"""测试 services/rag/pipeline.py：端到端 RAG 管道编排（v2: Query Understanding + FAQ-boosted）。
 
-mock retriever / reranker / rag_agent 三个单例，验证帧序列：
+mock query_understanding / retriever / reranker / rag_agent / followups，验证帧序列：
 - 正常流程：token* → citation → followup → done
 - 无结果兜底：token(no_result) → followup → done
 - clarify 分支：clarify → done
@@ -12,6 +12,7 @@ import pytest
 
 from app.schemas import ws as ws_constants
 from app.services.rag.pipeline import run_rag_pipeline, run_rag_pipeline_simple
+from app.services.rag.query_understanding import QueryAnalysis
 
 
 async def _collect_frames(gen) -> list[dict]:
@@ -23,26 +24,39 @@ async def _collect_frames(gen) -> list[dict]:
 
 
 def _async_gen(tokens: list[str]):
-    """构造一个 async generator，逐个 yield (kind, delta) 元组。
-
-    适配 RAGAgent.stream_answer 的新签名：返回 (kind, delta)，
-    kind 为 "reasoning" 或 "content"。测试场景默认全部为 content。
-    """
+    """构造一个 async generator，逐个 yield token。"""
     async def _gen():
         for t in tokens:
-            yield "content", t
+            yield t
     return _gen()
 
 
-def _chunk(cid: str, score: float, *, heading="标题A", content="内容片段") -> dict:
+def _chunk(
+    cid: str, score: float, *, heading="标题A", content="内容片段",
+    chunk_type="article_chunk", answer="",
+) -> dict:
     """构造 rerank 后的 chunk。"""
     return {
         "id": cid,
         "heading": heading,
         "article_slug": "post-1",
         "content": content,
+        "chunk_type": chunk_type,
+        "answer": answer,
         "score": score,
     }
+
+
+def _mock_analysis(
+    route: str = "rag", keywords=None, intent="用户意图", query="问题",
+) -> QueryAnalysis:
+    """构造 mock QueryAnalysis。"""
+    return QueryAnalysis(
+        keywords=keywords or ["关键词1"],
+        intent=intent,
+        route=route,
+        enhanced_query=query,
+    )
 
 
 # ===== 正常流程 =====
@@ -50,13 +64,23 @@ def _chunk(cid: str, score: float, *, heading="标题A", content="内容片段")
 
 @pytest.mark.asyncio
 async def test_pipeline_normal_flow():
-    """正常流程：retrieve → rerank(高分) → agent 流式 → citation → followup → done。"""
+    """正常流程：analyze → retrieve_articles → rerank(高分) → agent 流式 → citation → followup → done。"""
     chunks = [_chunk("c1", 0.3, heading="标题A", content="片段A内容")]
     ranked = [_chunk("c1", 0.9, heading="标题A", content="片段A内容")]
 
     with (
         patch(
-            "app.services.rag.pipeline.retriever.retrieve",
+            "app.services.rag.pipeline.analyze_query",
+            new_callable=AsyncMock,
+            return_value=_mock_analysis(route="rag"),
+        ),
+        patch(
+            "app.services.rag.pipeline.retriever.retrieve_faq",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        patch(
+            "app.services.rag.pipeline.retriever.retrieve_articles",
             new_callable=AsyncMock,
             return_value=chunks,
         ),
@@ -68,6 +92,11 @@ async def test_pipeline_normal_flow():
         patch(
             "app.services.rag.pipeline.rag_agent.stream_answer",
             return_value=_async_gen(["根据", "资料[1]", "，结论是X。"]),
+        ),
+        patch(
+            "app.services.rag.pipeline.fetch_followups_from_faq",
+            new_callable=AsyncMock,
+            return_value=["追问1", "追问2"],
         ),
     ):
         frames = await _collect_frames(
@@ -95,7 +124,17 @@ async def test_pipeline_no_citation_when_no_marker():
 
     with (
         patch(
-            "app.services.rag.pipeline.retriever.retrieve",
+            "app.services.rag.pipeline.analyze_query",
+            new_callable=AsyncMock,
+            return_value=_mock_analysis(),
+        ),
+        patch(
+            "app.services.rag.pipeline.retriever.retrieve_faq",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        patch(
+            "app.services.rag.pipeline.retriever.retrieve_articles",
             new_callable=AsyncMock,
             return_value=chunks,
         ),
@@ -107,6 +146,11 @@ async def test_pipeline_no_citation_when_no_marker():
         patch(
             "app.services.rag.pipeline.rag_agent.stream_answer",
             return_value=_async_gen(["没有引用的纯文本回答"]),
+        ),
+        patch(
+            "app.services.rag.pipeline.fetch_followups_from_faq",
+            new_callable=AsyncMock,
+            return_value=["追问1"],
         ),
     ):
         frames = await _collect_frames(
@@ -124,21 +168,22 @@ async def test_pipeline_no_citation_when_no_marker():
 
 @pytest.mark.asyncio
 async def test_pipeline_no_results_fallback():
-    """检索无结果 → LLM 兜底回答 + followup + done。
-
-    设计原则：无结果时走 LLM 兜底（"LLM 兜底比固定文案体验更好"），
-    不再返回固定文案。本测试 mock agent 输出"没有检索到..."以验证
-    兜底分支走通且不发 citation。
-    """
+    """检索无结果 → no_result token + followup + done。"""
     with (
         patch(
-            "app.services.rag.pipeline.retriever.retrieve",
+            "app.services.rag.pipeline.analyze_query",
+            new_callable=AsyncMock,
+            return_value=_mock_analysis(),
+        ),
+        patch(
+            "app.services.rag.pipeline.retriever.retrieve_faq",
             new_callable=AsyncMock,
             return_value=[],
         ),
         patch(
-            "app.services.rag.pipeline.rag_agent.stream_answer",
-            return_value=_async_gen(["没有检索到相关资料，无法回答。"]),
+            "app.services.rag.pipeline.retriever.retrieve_articles",
+            new_callable=AsyncMock,
+            return_value=[],
         ),
     ):
         frames = await _collect_frames(
@@ -150,7 +195,7 @@ async def test_pipeline_no_results_fallback():
     assert "没有检索到" in frames[0]["content"] or "没有找到" in frames[0]["content"]
     assert ws_constants.FOLLOWUP in types
     assert types[-1] == ws_constants.DONE
-    # 不应有 citation（无 ranked chunks）
+    # 不应有 citation
     assert ws_constants.CITATION not in types
 
 
@@ -165,7 +210,17 @@ async def test_pipeline_clarify_on_low_score():
 
     with (
         patch(
-            "app.services.rag.pipeline.retriever.retrieve",
+            "app.services.rag.pipeline.analyze_query",
+            new_callable=AsyncMock,
+            return_value=_mock_analysis(),
+        ),
+        patch(
+            "app.services.rag.pipeline.retriever.retrieve_faq",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        patch(
+            "app.services.rag.pipeline.retriever.retrieve_articles",
             new_callable=AsyncMock,
             return_value=chunks,
         ),
@@ -196,11 +251,23 @@ async def test_pipeline_clarify_on_low_score():
 
 @pytest.mark.asyncio
 async def test_pipeline_error_on_retrieve_failure():
-    """retrieve 抛异常 → error 帧 + done。"""
-    with patch(
-        "app.services.rag.pipeline.retriever.retrieve",
-        new_callable=AsyncMock,
-        side_effect=RuntimeError("milvus down"),
+    """retrieve_articles 抛异常 → error 帧 + done。"""
+    with (
+        patch(
+            "app.services.rag.pipeline.analyze_query",
+            new_callable=AsyncMock,
+            return_value=_mock_analysis(),
+        ),
+        patch(
+            "app.services.rag.pipeline.retriever.retrieve_faq",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        patch(
+            "app.services.rag.pipeline.retriever.retrieve_articles",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("milvus down"),
+        ),
     ):
         frames = await _collect_frames(
             run_rag_pipeline("问题", scope_type="global")
@@ -223,7 +290,17 @@ async def test_pipeline_error_on_agent_failure():
 
     with (
         patch(
-            "app.services.rag.pipeline.retriever.retrieve",
+            "app.services.rag.pipeline.analyze_query",
+            new_callable=AsyncMock,
+            return_value=_mock_analysis(),
+        ),
+        patch(
+            "app.services.rag.pipeline.retriever.retrieve_faq",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        patch(
+            "app.services.rag.pipeline.retriever.retrieve_articles",
             new_callable=AsyncMock,
             return_value=chunks,
         ),
@@ -251,16 +328,22 @@ async def test_pipeline_error_on_agent_failure():
 
 @pytest.mark.asyncio
 async def test_pipeline_simple_no_results():
-    """非流式版无结果 → LLM 兜底回答。"""
+    """非流式版无结果返回兜底。"""
     with (
         patch(
-            "app.services.rag.pipeline.retriever.retrieve",
+            "app.services.rag.pipeline.analyze_query",
+            new_callable=AsyncMock,
+            return_value=_mock_analysis(),
+        ),
+        patch(
+            "app.services.rag.pipeline.retriever.retrieve_faq",
             new_callable=AsyncMock,
             return_value=[],
         ),
         patch(
-            "app.services.rag.pipeline.rag_agent.stream_answer",
-            return_value=_async_gen(["没有检索到相关资料。"]),
+            "app.services.rag.pipeline.retriever.retrieve_articles",
+            new_callable=AsyncMock,
+            return_value=[],
         ),
     ):
         answer, citations, followups = await run_rag_pipeline_simple(
@@ -280,7 +363,17 @@ async def test_pipeline_simple_normal():
 
     with (
         patch(
-            "app.services.rag.pipeline.retriever.retrieve",
+            "app.services.rag.pipeline.analyze_query",
+            new_callable=AsyncMock,
+            return_value=_mock_analysis(),
+        ),
+        patch(
+            "app.services.rag.pipeline.retriever.retrieve_faq",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        patch(
+            "app.services.rag.pipeline.retriever.retrieve_articles",
             new_callable=AsyncMock,
             return_value=chunks,
         ),
@@ -292,6 +385,11 @@ async def test_pipeline_simple_normal():
         patch(
             "app.services.rag.pipeline.rag_agent.stream_answer",
             return_value=_async_gen(["根据[1]，结论是X。"]),
+        ),
+        patch(
+            "app.services.rag.pipeline.fetch_followups_from_faq",
+            new_callable=AsyncMock,
+            return_value=["追问1", "追问2"],
         ),
     ):
         answer, citations, followups = await run_rag_pipeline_simple(

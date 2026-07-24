@@ -28,10 +28,16 @@ COLLECTION_FIELDS = {
     "content": "VARCHAR(8192)",
     "vector_dense": "FLOAT_VECTOR(1024)",
     "vector_sparse": "SPARSE_FLOAT_VECTOR",
+    "chunk_type": "VARCHAR(16)",
+    "answer": "VARCHAR(8192)",
 }
 
 DENSE_DIM = 1024  # BGE-M3 稠密维度
 GLOBAL_PARTITION = "global"
+
+# chunk_type 取值
+CHUNK_TYPE_ARTICLE = "article_chunk"
+CHUNK_TYPE_QA = "qa"
 
 
 class MilvusStore:
@@ -80,6 +86,8 @@ class MilvusStore:
         schema.add_field("heading", DataType.VARCHAR, max_length=200)
         schema.add_field("tags", DataType.JSON)
         schema.add_field("content", DataType.VARCHAR, max_length=8192)
+        schema.add_field("chunk_type", DataType.VARCHAR, max_length=16)
+        schema.add_field("answer", DataType.VARCHAR, max_length=8192)
 
         # 索引
         index_params = client.prepare_index_params()
@@ -204,7 +212,7 @@ class MilvusStore:
 
         output_fields = [
             "id", "doc_id", "channel", "article_slug",
-            "heading", "tags", "content",
+            "heading", "tags", "content", "chunk_type", "answer",
         ]
 
         results = client.search(
@@ -250,7 +258,7 @@ class MilvusStore:
 
         output_fields = [
             "id", "doc_id", "channel", "article_slug",
-            "heading", "tags", "content",
+            "heading", "tags", "content", "chunk_type", "answer",
         ]
 
         results = client.search(
@@ -284,6 +292,8 @@ class MilvusStore:
                 "heading": entity.get("heading", ""),
                 "tags": entity.get("tags", []),
                 "content": entity.get("content", ""),
+                "chunk_type": entity.get("chunk_type", "article_chunk"),
+                "answer": entity.get("answer", ""),
                 "score": score,
             })
         return chunks

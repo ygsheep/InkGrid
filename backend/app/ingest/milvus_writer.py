@@ -4,7 +4,7 @@
 embedding_id 列表（即 Milvus 主键），供回填 Chunk.embedding_id。
 """
 from app.core.logging import get_logger
-from app.db.milvus import GLOBAL_PARTITION, milvus_store
+from app.db.milvus import CHUNK_TYPE_ARTICLE, GLOBAL_PARTITION, milvus_store
 from app.ingest.embedder import embedder
 
 logger = get_logger("ingest.milvus_writer")
@@ -56,6 +56,8 @@ async def write_chunks_to_milvus(
             "heading": heading,
             "tags": tags or [],
             "content": chunk.content,
+            "chunk_type": CHUNK_TYPE_ARTICLE,
+            "answer": "",
             "vector_dense": dense,
             "vector_sparse": sparse,
         })

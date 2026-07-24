@@ -9,6 +9,7 @@ from app.crud.channel import channel
 from app.crud.chat import chat_message, chat_session
 from app.crud.persona import persona
 from app.crud.post import post
+from app.crud import qa as qa_crud
 
 __all__ = [
     "admin_crud",
@@ -18,4 +19,5 @@ __all__ = [
     "persona",
     "chat_session",
     "chat_message",
+    "qa_crud",
 ]

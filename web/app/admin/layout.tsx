@@ -15,6 +15,7 @@ import {
   Menu as MenuIcon,
   X,
   Loader2,
+  MessageSquareText,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useMe, useLogout } from '@/hooks/useAdmin';
@@ -24,6 +25,7 @@ const menu = [
   { href: '/admin', label: '看板', icon: LayoutDashboard },
   { href: '/admin/posts', label: '文章', icon: FileText },
   { href: '/admin/knowledge', label: '知识库', icon: BookOpen },
+  { href: '/admin/qa', label: '问题审核', icon: MessageSquareText },
   { href: '/admin/channels', label: '频道', icon: Layers },
   { href: '/admin/persona', label: '人设', icon: Bot },
   { href: '/admin/policy-collector', label: '政策采集', icon: Database },

@@ -36,13 +36,21 @@ class Article(ArticleSummary):
 
 
 class PostCreate(BaseModel):
-    """后台写文章入参。"""
+    """后台写文章/笔记入参。
+
+    channel_id 可空：未发布的私有笔记（inbox/daily/...）无频道。
+    category 默认 inbox：新建笔记默认进收集箱，笔者后续整理。
+    """
 
     slug: str = ""
     title: str
     excerpt: str | None = None
     content_md: str
-    channel_id: UUID
+    channel_id: UUID | None = None
+    category: str = "inbox"
+    folder_path: str | None = None
+    is_moc: bool = False
+    source_url: str | None = None
     tags: list[str] | None = None
     status: str = "draft"
     reading_time: int | None = None
@@ -50,13 +58,17 @@ class PostCreate(BaseModel):
 
 
 class PostUpdate(BaseModel):
-    """后台更新文章入参（全字段可选）。"""
+    """后台更新文章/笔记入参（全字段可选）。"""
 
     slug: str | None = None
     title: str | None = None
     excerpt: str | None = None
     content_md: str | None = None
     channel_id: UUID | None = None
+    category: str | None = None
+    folder_path: str | None = None
+    is_moc: bool | None = None
+    source_url: str | None = None
     tags: list[str] | None = None
     status: str | None = None
     reading_time: int | None = None

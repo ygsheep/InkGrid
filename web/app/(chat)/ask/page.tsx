@@ -3,70 +3,68 @@
 import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { Drawer } from 'antd';
-import {
-  ArrowLeft,
-  Mic,
-  Send,
-  Plus,
-  Phone,
-  User,
-  ChevronDown,
-  Check,
-  Square,
-  AlertCircle,
-  FileText,
-  Brain,
-} from 'lucide-react';
+import { ArrowLeft, Mic, Send, Plus, Phone, User, ChevronDown, Check } from 'lucide-react';
 import { usePersona } from '@/lib/usePersona';
-import { useChat, type ChatMsg } from '@/hooks/useChat';
-import { cn } from '@/lib/utils';
-import { ChatMarkdown } from '@/components/chat/ChatMarkdown';
-import { MessageActions } from '@/components/chat/MessageActions';
+import type { Citation } from '@/types';
+
+interface Msg {
+  role: 'user' | 'assistant';
+  content: string;
+  citations?: Citation[];
+  followUps?: string[];
+  clarifyOptions?: string[];
+  timestamp: string;
+}
 
 const quickCommands = ['/状态报告', '/知识库概览', '/最新文章', '/清空会话'];
 
+function nowTime() {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2, '0')}:${String(
+    d.getMinutes(),
+  ).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+}
+
 /**
  * AI 对话页 — 终端式沉浸聊天 UI。
- * 接入后端 /ws/chat 流式问答（useChat hook），支持：
- *  - token 流式渲染 + 光标
- *  - citation 引用溯源（可跳转文章详情）
- *  - followup 追问建议（可点击作为下一问）
- *  - clarify 澄清请求（带选项按钮）
- *  - error / rate / stop / 重连
+ * 参考 plan/虚拟对话.html + plan/虚拟对话-2.html：
+ *  - 顶部实体头（状态指示 + 语音通话）
+ *  - 时间戳分隔符
+ *  - Agent 气泡（surface-container-lowest + 1px 边框 + inner-glow）
+ *  - 用户气泡（纯白底 + 黑字）
+ *  - 思考中指示器
+ *  - 流式光标
+ *  - 自动伸缩 textarea + 快捷命令
+ *  - 移动端 max-w-md 单列，桌面端 max-w-chat 居中
  */
 export default function AskPage() {
-  // 初始欢迎语：timestamp 留空，hydration 后补设，避免 SSR 不一致
-  const [initialMessages] = useState<ChatMsg[]>(() => [
+  // 初始消息的 timestamp 留空，避免 SSR 与 hydration 时间不一致导致
+  // "Text content does not match server-rendered HTML" 错误。真实时间在
+  // useEffect 中设置。
+  const [messages, setMessages] = useState<Msg[]>([
     {
-      kind: 'assistant',
+      role: 'assistant',
       content:
         '上行链路已建立。我基于博主的文章知识库回答你的问题——每一次回答都会标注引用出处。请发送指令或提问。',
-      streaming: false,
       timestamp: '',
     },
   ]);
-
-  const { persona, personaId, personas, select, hydrated } = usePersona();
-  const {
-    messages: chatMessages,
-    streaming,
-    connected,
-    connecting,
-    remaining,
-    send,
-    stop,
-    reset,
-  } = useChat({
-    personaId,
-    scopeType: 'global',
-    initialMessages,
-  });
-
   const [input, setInput] = useState('');
+  const [streaming, setStreaming] = useState(false);
   const [focused, setFocused] = useState(false);
   const [personaDrawerOpen, setPersonaDrawerOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const { persona, personaId, personas, select, hydrated } = usePersona();
+
+  // hydration 完成后补设初始消息的时间戳
+  useEffect(() => {
+    setMessages((prev) =>
+      prev.length > 0 && prev[0].timestamp === ''
+        ? [{ ...prev[0], timestamp: nowTime() }, ...prev.slice(1)]
+        : prev,
+    );
+  }, []);
 
   // 从首页/文章页带过来的初始问题
   useEffect(() => {
@@ -83,7 +81,7 @@ export default function AskPage() {
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [chatMessages, streaming]);
+  }, [messages, streaming]);
 
   // textarea 自动伸缩
   useEffect(() => {
@@ -93,99 +91,83 @@ export default function AskPage() {
     ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
   }, [input]);
 
-  const onSubmit = (text?: string) => {
+  const send = (text?: string) => {
     const q = (text ?? input).trim();
-    if (!q || streaming || connecting) return;
-    // 快捷命令：清空会话
-    if (q === '/清空会话') {
-      reset();
-      setInput('');
-      return;
-    }
-    send(q);
+    if (!q || streaming) return;
+    setMessages((m) => [
+      ...m,
+      { role: 'user', content: q, timestamp: nowTime() },
+    ]);
     setInput('');
+    setStreaming(true);
+    // 骨架阶段 mock 流式回复，接入 WebSocket 后逐字渲染
+    setTimeout(() => {
+      setMessages((m) => [
+        ...m,
+        {
+          role: 'assistant',
+          content: `（mock 回复）关于「${q}」，根据博主的文章，可以这样理解……\n\n后续接入流式 WebSocket 后，这里会逐字渲染，并附上引用出处。`,
+          citations: [
+            {
+              articleId: 'mock-1',
+              title: '相关文章',
+              slug: 'related-article',
+              snippet: '这是文章片段摘要...',
+            },
+          ],
+          followUps: ['关于这个问题还有哪些细节？', '能否举例说明？'],
+          timestamp: nowTime(),
+        },
+      ]);
+      setStreaming(false);
+    }, 900);
   };
-
-  // 点击追问 / clarify 选项 → 作为下一问
-  const askAgain = (text: string) => {
-    if (streaming || connecting) return;
-    send(text);
-  };
-
-  // 重试：找到当前 assistant 消息的前一条 user 消息，重新发送
-  const retryLast = (assistantIndex: number) => {
-    if (streaming || connecting) return;
-    // 向前找最近的 user 消息
-    for (let j = assistantIndex - 1; j >= 0; j--) {
-      if (chatMessages[j].kind === 'user') {
-        send(chatMessages[j].content);
-        return;
-      }
-    }
-  };
-
-  // 首个 reasoning/content 到达前显示"AI 正在思考"占位
-  const lastMsg = chatMessages[chatMessages.length - 1];
-  const waitingFirstToken =
-    streaming && !(lastMsg?.kind === 'assistant' && !!lastMsg.streaming);
 
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)] min-h-0">
-      {/* 实体头 — 角色切换 + 状态指示 + 语音通话（紧凑单行，突出内容区） */}
+      {/* 实体头 — 角色切换 + 状态指示 + 语音通话 */}
       <header className="border-b border-outline-variant bg-black/70 backdrop-blur-md z-40">
-        <div className="mx-auto max-w-chat px-margin-mobile md:px-margin-desktop py-2 flex justify-between items-center gap-3">
-          <div className="flex items-center gap-2.5 min-w-0">
+        <div className="mx-auto max-w-chat px-margin-mobile md:px-margin-desktop py-4 flex justify-between items-center gap-3">
+          <div className="flex items-center gap-3 min-w-0">
             <button
               onClick={() => {
                 if (window.history.length > 1) window.history.back();
                 else window.location.href = '/';
               }}
-              className="p-1 -ml-1 text-on-surface-variant hover:text-primary transition-colors shrink-0"
+              className="p-2 -ml-2 text-on-surface-variant hover:text-primary transition-colors shrink-0"
               aria-label="返回"
             >
-              <ArrowLeft size={16} />
+              <ArrowLeft size={18} />
             </button>
-            <div className="w-7 h-7 border border-outline bg-surface-container flex items-center justify-center shrink-0">
-              <User size={14} className="text-primary" />
+            <div className="w-10 h-10 border border-outline bg-surface-container flex items-center justify-center shrink-0">
+              <User size={18} className="text-primary" />
             </div>
-            {/* 角色切换按钮 — 单行紧凑布局 */}
+            {/* 角色切换按钮 — 点击打开 Drawer */}
             <button
               onClick={() => setPersonaDrawerOpen(true)}
-              className="flex items-center gap-1.5 min-w-0 text-left group"
+              className="flex flex-col min-w-0 text-left group"
               aria-label="切换角色"
             >
-              <span className="font-headline text-headline-sm text-primary uppercase tracking-tighter leading-none truncate">
-                {hydrated ? persona.name : 'AI 节点'}
+              <span className="flex items-center gap-1.5">
+                <span className="font-headline text-headline-md text-primary uppercase tracking-tighter leading-none truncate">
+                  {hydrated ? persona.name : 'AI 节点'}
+                </span>
+                <ChevronDown
+                  size={14}
+                  className="text-on-surface-variant group-hover:text-primary transition-colors shrink-0"
+                />
               </span>
-              <ChevronDown
-                size={12}
-                className="text-on-surface-variant group-hover:text-primary transition-colors shrink-0"
-              />
-              {/* 连接状态指示灯 + tagline 内联到同一行 */}
-              <span
-                className={cn(
-                  'w-1.5 h-1.5 rounded-full shrink-0 ml-1',
-                  connected
-                    ? 'bg-tertiary-fixed animate-pulse'
-                    : connecting
-                      ? 'bg-tertiary-fixed-dim animate-pulse'
-                      : 'bg-outline',
-                )}
-              />
-              <span className="font-mono text-label-mono text-tertiary-fixed-dim uppercase truncate hidden sm:inline">
-                {hydrated
-                  ? persona.tagline
-                  : connected
-                    ? '上行链路激活'
-                    : '上行链路待激活'}
+              <span className="font-mono text-label-mono text-tertiary-fixed-dim uppercase flex items-center gap-2 mt-1.5">
+                <span className="w-1.5 h-1.5 bg-tertiary-fixed-dim animate-pulse" />
+                {hydrated ? persona.tagline : '上行链路激活'}
               </span>
             </button>
           </div>
           <Link
             href="/ask/voice"
-            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-primary text-on-primary font-mono text-label-mono uppercase tracking-widest hover:bg-primary/90 transition-colors active:scale-95 shrink-0"
+            className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-primary text-on-primary font-mono text-label-mono uppercase tracking-widest hover:bg-primary/90 transition-colors active:scale-95 shrink-0"
           >
-            <Phone size={12} />
+            <Phone size={14} />
             <span className="hidden sm:inline">语音通话</span>
           </Link>
         </div>
@@ -204,24 +186,21 @@ export default function AskPage() {
             </span>
           </div>
 
-          {chatMessages.map((m, i) => (
+          {messages.map((m, i) => (
             <MessageBubble
               key={i}
               msg={m}
-              index={i}
               streaming={
                 streaming &&
-                i === chatMessages.length - 1 &&
-                (m.kind === 'assistant' || m.kind === 'clarify')
+                i === messages.length - 1 &&
+                m.role === 'assistant'
               }
-              onFollowUp={askAgain}
-              onRetry={() => retryLast(i)}
-              disabled={streaming || connecting}
+              onFollowUp={(q) => send(q)}
             />
           ))}
 
-          {/* 思考中指示器 — 仅在首个 reasoning/content 到达前显示 */}
-          {waitingFirstToken && (
+          {/* 思考中指示器 */}
+          {streaming && (
             <div className="flex items-center gap-2 text-outline font-mono text-label-mono animate-pulse">
               <span>AI 正在思考</span>
               <span className="flex gap-1">
@@ -239,22 +218,14 @@ export default function AskPage() {
         <div className="mx-auto max-w-chat px-margin-mobile md:px-margin-desktop py-4">
           <div className="flex items-center justify-between mb-2">
             <span
-              className={cn(
-                'font-mono text-label-mono uppercase tracking-widest transition-colors',
-                focused ? 'text-primary' : 'text-outline',
-              )}
+              className={`font-mono text-label-mono uppercase tracking-widest transition-colors ${
+                focused ? 'text-primary' : 'text-outline'
+              }`}
             >
-              {focused
-                ? '输入缓冲区：激活传输中'
-                : connecting
-                  ? '建立会话中…'
-                  : '输入缓冲区：就绪'}
+              {focused ? '输入缓冲区：激活传输中' : '输入缓冲区：就绪'}
             </span>
-            <span className="font-mono text-label-mono text-primary uppercase tracking-widest flex items-center gap-3">
-              {remaining !== null && (
-                <span className="text-tertiary-fixed">剩余 {remaining} 次</span>
-              )}
-              <span>{connected ? '链路: 在线' : '链路: 离线'}</span>
+            <span className="font-mono text-label-mono text-primary uppercase tracking-widest">
+              延迟: 12ms
             </span>
           </div>
 
@@ -274,12 +245,12 @@ export default function AskPage() {
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
-                  onSubmit();
+                  send();
                 }
               }}
               placeholder="发送消息…"
               rows={1}
-              disabled={streaming || connecting}
+              disabled={streaming}
               className="flex-1 bg-transparent border-none focus:outline-none py-3 font-mono text-body-sm text-on-surface placeholder:text-outline resize-none disabled:opacity-50 min-w-0"
             />
             <button
@@ -288,24 +259,14 @@ export default function AskPage() {
             >
               <Mic size={18} />
             </button>
-            {streaming ? (
-              <button
-                onClick={stop}
-                className="w-12 h-12 bg-error flex items-center justify-center active:scale-95 transition-transform shrink-0"
-                aria-label="停止生成"
-              >
-                <Square size={14} className="text-on-error" fill="currentColor" />
-              </button>
-            ) : (
-              <button
-                onClick={() => onSubmit()}
-                disabled={connecting || !input.trim()}
-                className="w-12 h-12 bg-primary flex items-center justify-center active:scale-95 transition-transform disabled:opacity-50 shrink-0"
-                aria-label="发送"
-              >
-                <Send size={16} className="text-on-primary" />
-              </button>
-            )}
+            <button
+              onClick={() => send()}
+              disabled={streaming}
+              className="w-12 h-12 bg-primary flex items-center justify-center active:scale-95 transition-transform disabled:opacity-50 shrink-0"
+              aria-label="发送"
+            >
+              <Send size={16} className="text-on-primary" />
+            </button>
           </div>
 
           {/* 快捷命令 */}
@@ -313,9 +274,8 @@ export default function AskPage() {
             {quickCommands.map((cmd) => (
               <button
                 key={cmd}
-                onClick={() => onSubmit(cmd)}
-                disabled={streaming || connecting}
-                className="px-3 py-1.5 border border-outline-variant font-mono text-label-mono text-on-surface-variant whitespace-nowrap hover:border-primary hover:text-primary transition-colors disabled:opacity-50"
+                onClick={() => send(cmd)}
+                className="px-3 py-1.5 border border-outline-variant font-mono text-label-mono text-on-surface-variant whitespace-nowrap hover:border-primary hover:text-primary transition-colors"
               >
                 {cmd}
               </button>
@@ -353,36 +313,29 @@ export default function AskPage() {
                   select(p.id);
                   setPersonaDrawerOpen(false);
                 }}
-                className={cn(
-                  'flex items-start gap-3 px-5 py-4 border-b border-outline-variant text-left transition-colors',
-                  active
-                    ? 'bg-surface-container-lowest'
-                    : 'hover:bg-surface-container-lowest',
-                )}
+                className={`flex items-start gap-3 px-5 py-4 border-b border-outline-variant text-left transition-colors ${
+                  active ? 'bg-surface-container-lowest' : 'hover:bg-surface-container-lowest'
+                }`}
               >
                 <div
-                  className={cn(
-                    'w-8 h-8 border flex items-center justify-center shrink-0 font-mono text-label-mono',
+                  className={`w-8 h-8 border flex items-center justify-center shrink-0 font-mono text-label-mono ${
                     active
                       ? 'border-tertiary-fixed text-tertiary-fixed bg-tertiary-fixed/10'
-                      : 'border-outline-variant text-on-surface-variant',
-                  )}
+                      : 'border-outline-variant text-on-surface-variant'
+                  }`}
                 >
                   {p.serial}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2">
                     <span
-                      className={cn(
-                        'font-headline text-body-md',
-                        active ? 'text-primary' : 'text-on-surface',
-                      )}
+                      className={`font-headline text-body-md ${
+                        active ? 'text-primary' : 'text-on-surface'
+                      }`}
                     >
                       {p.name}
                     </span>
-                    {active && (
-                      <Check size={14} className="text-tertiary-fixed shrink-0" />
-                    )}
+                    {active && <Check size={14} className="text-tertiary-fixed shrink-0" />}
                   </div>
                   <span className="font-mono text-label-mono text-tertiary-fixed-dim uppercase tracking-widest">
                     {p.tagline}
@@ -407,264 +360,103 @@ export default function AskPage() {
   );
 }
 
-// ===== 消息气泡 =====
-
-/**
- * 思考过程折叠区（reasoning 模型专用）。
- * - 流式思考中（streaming=true）：自动展开，显示光标，不可手动收起
- * - 思考完成（streaming=false）：自动收起，显示字数统计，可手动展开/收起
- */
-function ReasoningBlock({
-  reasoning,
-  streaming,
-}: {
-  reasoning: string;
-  streaming: boolean;
-}) {
-  const [expanded, setExpanded] = useState(streaming);
-
-  // streaming 变化时同步：思考中展开，完成收起
-  useEffect(() => {
-    setExpanded(streaming);
-  }, [streaming]);
-
-  return (
-    <div className="mb-4 border-l-2 border-tertiary-fixed/40 pl-3">
-      <button
-        type="button"
-        disabled={streaming}
-        onClick={() => !streaming && setExpanded(!expanded)}
-        className="flex items-center gap-2 font-mono text-label-mono text-on-surface-variant hover:text-tertiary-fixed transition-colors w-full disabled:cursor-default"
-      >
-        <Brain
-          size={12}
-          className={cn(streaming ? 'text-tertiary-fixed animate-pulse' : '')}
-        />
-        <span className="uppercase tracking-widest">
-          {streaming ? '思考中' : '思考过程'}
-        </span>
-        {!streaming && (
-          <span className="text-outline">· {reasoning.length} 字</span>
-        )}
-        {!streaming && (
-          <ChevronDown
-            size={12}
-            className={cn('ml-auto transition-transform', expanded && 'rotate-180')}
-          />
-        )}
-      </button>
-      {expanded && (
-        <div className="mt-2 font-mono text-body-sm text-on-surface-variant/70 leading-relaxed whitespace-pre-wrap max-h-80 overflow-y-auto">
-          {reasoning}
-          {streaming && <span className="cursor-blink" />}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function MessageBubble({
   msg,
-  index,
   streaming,
   onFollowUp,
-  onRetry,
-  disabled,
 }: {
-  msg: ChatMsg;
-  index: number;
+  msg: Msg;
   streaming: boolean;
-  onFollowUp: (text: string) => void;
-  onRetry: () => void;
-  disabled: boolean;
+  onFollowUp?: (q: string) => void;
 }) {
-  if (msg.kind === 'user') {
+  if (msg.role === 'user') {
     return (
       <div className="flex flex-col items-end">
-        <div className="w-fit max-w-full">
+        <div className="max-w-[85%] md:max-w-[70%] w-full">
           <div className="font-mono text-label-mono text-outline mb-2 flex justify-end gap-4 uppercase tracking-widest">
-            <span>{msg.timestamp || '——'}</span>
+            <span>{msg.timestamp}</span>
             <span>操作员</span>
           </div>
-          {/* 用户气泡：secondary-container（中深灰）与模型气泡（surface-container-lowest，最深）形成层次区分，
-              避免纯白背景在深色主题下过于刺眼。msg-user-bubble 用于覆盖 ::selection。 */}
-          <div className="msg-user-bubble bg-secondary-container text-on-secondary-container border border-outline-variant p-4 md:p-6">
+          <div className="bg-primary text-on-primary p-4 md:p-6">
             <p className="font-sans text-body-md leading-relaxed whitespace-pre-wrap">
               {msg.content}
             </p>
-            {/* 用户消息底部操作栏：仅复制 */}
-            {!streaming && (
-              <div className="flex justify-end">
-                <MessageActions content={msg.content} compact />
-              </div>
-            )}
           </div>
         </div>
       </div>
     );
   }
 
-  if (msg.kind === 'error') {
-    return (
-      <div className="flex flex-col items-start max-w-[85%] md:max-w-[70%]">
-        <div className="font-mono text-label-mono text-outline mb-2 flex gap-4 uppercase tracking-widest">
-          <span>AI 节点</span>
-          <span>{msg.timestamp || '——'}</span>
-        </div>
-        <div className="border border-error/60 bg-error-container/20 p-4 md:p-6 w-full flex items-start gap-3">
-          <AlertCircle size={16} className="text-error shrink-0 mt-0.5" />
-          <div className="flex-1 min-w-0">
-            <p className="font-mono text-label-mono text-error uppercase tracking-widest mb-1">
-              错误 {msg.code ? `· ${msg.code}` : ''}
-            </p>
-            <p className="font-sans text-body-sm text-on-surface leading-relaxed">
-              {msg.content}
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (msg.kind === 'clarify') {
-    return (
-      <div className="flex flex-col items-start max-w-[85%] md:max-w-[70%]">
-        <div className="font-mono text-label-mono text-outline mb-2 flex gap-4 uppercase tracking-widest">
-          <span>AI 节点</span>
-          <span>{msg.timestamp || '——'}</span>
-        </div>
-        <div
-          className="bg-surface-container-lowest border border-outline-variant p-4 md:p-6 w-full"
-          style={{ borderTopColor: 'rgba(255,255,255,0.1)' }}
-        >
-          <p className="font-mono text-label-mono text-tertiary-fixed uppercase tracking-widest mb-2">
-            需要澄清
-          </p>
-          <p className="font-sans text-body-md text-on-surface leading-relaxed whitespace-pre-wrap">
-            {msg.content}
-          </p>
-          {msg.options && msg.options.length > 0 && (
-            <div className="mt-4 flex flex-col gap-2">
-              {msg.options.map((opt, i) => (
-                <button
-                  key={i}
-                  disabled={disabled}
-                  onClick={() => onFollowUp(opt)}
-                  className="text-left px-3 py-2 border border-outline-variant font-sans text-body-sm text-on-surface-variant hover:border-tertiary-fixed hover:text-tertiary-fixed transition-colors disabled:opacity-50"
-                >
-                  <span className="font-mono text-label-mono text-tertiary-fixed mr-2">
-                    {String(i + 1).padStart(2, '0')}
-                  </span>
-                  {opt}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // assistant
   return (
-    <div className="flex flex-col items-start w-fit max-w-full">
+    <div className="flex flex-col items-start max-w-[85%] md:max-w-[70%]">
       <div className="font-mono text-label-mono text-outline mb-2 flex gap-4 uppercase tracking-widest">
         <span>AI 节点</span>
-        <span>{msg.timestamp || '——'}</span>
+        <span>{msg.timestamp}</span>
       </div>
       {/* inner-glow: 1px top border 替代阴影，表达层级抬升 */}
       <div
         className="bg-surface-container-lowest border border-outline-variant p-4 md:p-6 w-full"
         style={{ borderTopColor: 'rgba(255,255,255,0.1)' }}
       >
-        {/* 思考过程折叠区（reasoning 模型） */}
-        {msg.reasoning && (
-          <ReasoningBlock
-            reasoning={msg.reasoning}
-            streaming={!!msg.reasoningStreaming}
-          />
-        )}
-        {/* 正式回答（content 为空且仍在思考时隐藏，避免空气泡） */}
-        {(msg.content || !msg.reasoning) && (
-          <div className="text-on-surface leading-relaxed">
-            <ChatMarkdown content={msg.content} />
-            {streaming && msg.streaming && <span className="cursor-blink" />}
-          </div>
-        )}
+        <p className="font-sans text-body-md text-on-surface leading-relaxed whitespace-pre-wrap">
+          {msg.content}
+          {streaming && <span className="cursor-blink" />}
+        </p>
 
         {/* 引用溯源 */}
         {msg.citations && msg.citations.length > 0 && (
-          <div className="mt-4 border-t border-outline-variant pt-4">
-            <p className="font-mono text-label-mono text-on-surface-variant uppercase tracking-widest mb-2 flex items-center gap-1.5">
-              <FileText size={12} />
-              引用出处 · {msg.citations.length}
-            </p>
-            <ul className="space-y-2">
-              {msg.citations.map((c, i) => (
-                <li key={c.articleId + i}>
-                  {c.slug ? (
-                    <Link
-                      href={`/posts/${c.slug}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="group flex items-start gap-2 px-2 py-1.5 -mx-2 hover:bg-surface-container-low transition-colors"
-                    >
-                      <span className="font-mono text-label-mono text-tertiary-fixed mt-0.5 shrink-0">
-                        [{i + 1}]
-                      </span>
-                      <span className="flex-1 min-w-0">
-                        <span className="font-sans text-body-sm text-on-surface group-hover:text-primary transition-colors block truncate">
-                          {c.title || c.slug}
-                        </span>
-                        {c.snippet && (
-                          <span className="font-mono text-label-mono text-on-surface-variant line-clamp-2 mt-0.5">
-                            {c.snippet}
-                          </span>
-                        )}
-                      </span>
-                    </Link>
-                  ) : (
-                    <div className="flex items-start gap-2 px-2 py-1.5 -mx-2">
-                      <span className="font-mono text-label-mono text-tertiary-fixed mt-0.5 shrink-0">
-                        [{i + 1}]
-                      </span>
-                      <span className="flex-1 min-w-0">
-                        <span className="font-sans text-body-sm text-on-surface block truncate">
-                          {c.title}
-                        </span>
-                        {c.snippet && (
-                          <span className="font-mono text-label-mono text-on-surface-variant line-clamp-2 mt-0.5">
-                            {c.snippet}
-                          </span>
-                        )}
-                      </span>
-                    </div>
-                  )}
-                </li>
-              ))}
-            </ul>
+          <div className="mt-3 border-t border-outline-variant pt-3 space-y-1">
+            <span className="font-mono text-label-mono text-on-surface-variant uppercase tracking-widest">
+              引用来源
+            </span>
+            {msg.citations.map((c, i) => (
+              <Link
+                key={i}
+                href={`/posts/${c.slug}`}
+                className="block font-mono text-label-mono text-primary hover:underline"
+              >
+                [{i + 1}] {c.title}
+              </Link>
+            ))}
           </div>
         )}
 
-        {/* 追问建议 */}
-        {msg.followUps && msg.followUps.length > 0 && !streaming && (
-          <div className="mt-4 flex flex-wrap gap-2">
-            {msg.followUps.map((q, i) => (
+        {/* 澄清选项 */}
+        {msg.clarifyOptions && msg.clarifyOptions.length > 0 && (
+          <div className="mt-3 border-t border-outline-variant pt-3 space-y-2">
+            <span className="font-mono text-label-mono text-on-surface-variant uppercase tracking-widest">
+              你是否想问
+            </span>
+            {msg.clarifyOptions.map((opt, i) => (
               <button
                 key={i}
-                disabled={disabled}
-                onClick={() => onFollowUp(q)}
-                className="px-3 py-1.5 border border-outline-variant font-sans text-body-sm text-on-surface-variant hover:border-tertiary-fixed hover:text-tertiary-fixed transition-colors disabled:opacity-50 text-left"
+                onClick={() => onFollowUp?.(opt)}
+                className="block w-full text-left px-3 py-2 border border-outline-variant font-mono text-label-mono text-on-surface hover:border-primary hover:text-primary transition-colors"
               >
-                {q}
+                {opt}
               </button>
             ))}
           </div>
         )}
 
-        {/* 操作栏：复制 / 重试 / 点赞 / 点踩（流式结束后显示） */}
-        {!streaming && msg.content && (
-          <MessageActions content={msg.content} onRetry={onRetry} />
+        {/* 推荐追问 */}
+        {msg.followUps && msg.followUps.length > 0 && (
+          <div className="mt-3 border-t border-outline-variant pt-3">
+            <span className="font-mono text-label-mono text-on-surface-variant uppercase tracking-widest">
+              推荐追问
+            </span>
+            <div className="flex flex-wrap gap-2 mt-2">
+              {msg.followUps.map((q, i) => (
+                <button
+                  key={i}
+                  onClick={() => onFollowUp?.(q)}
+                  className="px-3 py-1.5 border border-outline-variant font-mono text-label-mono text-on-surface-variant whitespace-nowrap hover:border-primary hover:text-primary transition-colors"
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+          </div>
         )}
       </div>
     </div>
