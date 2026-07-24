@@ -1,8 +1,7 @@
 """澄清 / 拒答 / 降级 逻辑。"""
 import re
 
-#: 澄清阈值
-CLARIFY_THRESHOLD = 0.3
+from app.config import get_settings
 
 #: 中文停用词 / 疑问词，用于 followup 关键词提取
 _STOP_WORDS: set[str] = {
@@ -26,8 +25,14 @@ _DEFAULT_CLARIFY_OPTIONS = [
 ]
 
 
-def should_clarify(top_score: float, threshold: float = CLARIFY_THRESHOLD) -> bool:
-    """判断是否需要触发澄清（top rerank 分数低于阈值）。"""
+def should_clarify(top_score: float, threshold: float | None = None) -> bool:
+    """判断是否需要触发澄清（top rerank 分数低于阈值）。
+
+    threshold 默认 None → 读 settings.rag_clarify_threshold（默认 0.1）。
+    bge-reranker-v2-m3 对中文查询打分偏低，0.3 过严会误杀正常查询。
+    """
+    if threshold is None:
+        threshold = get_settings().rag_clarify_threshold
     return top_score < threshold
 
 

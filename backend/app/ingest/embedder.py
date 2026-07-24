@@ -111,8 +111,16 @@ class Embedder:
         return dense, sparse
 
     async def embed_query(self, query: str) -> tuple[list[float], dict[int, float]]:
-        """单条 query embedding，返回 (稠密向量, 稀疏向量)。"""
+        """单条 query embedding，返回 (稠密向量, 稀疏向量)。
+
+        TEI 模式下稀疏返回空 dict（TEI /embed 不产稀疏向量），
+        retriever.search_sparse 收到空 dict 会跳过 sparse 检索，避免用占位向量搜 Milvus。
+        写入端的 sparse 占位由 embed_batch 处理（Milvus 写入要求非空 sparse）。
+        """
         dense, sparse = await self.embed_batch([query])
+        if settings.embedding_tei_url:
+            # TEI 模式：query 端无需占位，返回空 dict 让 retriever 跳过 sparse 检索
+            return dense[0], {}
         return dense[0], sparse[0]
 
 

@@ -15,6 +15,7 @@ celery_app = Celery(
     backend=settings.redis_url,
     include=[
         "app.tasks.ingest_tasks",
+        "app.tasks.reindex_tasks",
     ],
 )
 

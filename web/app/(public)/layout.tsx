@@ -6,8 +6,8 @@ import Footer from '@/components/layout/Footer';
  * Spatial grid is applied per-page (home/list/channel) — the article detail
  * page and admin use a flat surface to favour long-form reading.
  *
- * 频道列表由 Navbar 内部 useChannels 拉取并缓存,(public) 与 (chat) 共享,
- * 保证导航在任何路由下一致。
+ * 频道入口为单个 /channel 路由,频道切换在频道页内通过横向 chips 完成。
+ * useChannels 由搜索页等客户端组件按需使用并共享 React Query 缓存。
  */
 export default async function PublicLayout({
   children,

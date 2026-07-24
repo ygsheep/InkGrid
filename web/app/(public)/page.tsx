@@ -82,7 +82,7 @@ export default async function HomePage() {
             </div>
             {primaryChannel && (
               <Link
-                href={`/channel/${primaryChannel.slug}`}
+                href={`/channel?channel=${primaryChannel.slug}`}
                 className="font-mono text-label-mono text-on-surface-variant hover:text-primary uppercase tracking-widest hidden md:block"
               >
                 查看全部 →

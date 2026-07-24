@@ -373,54 +373,87 @@ async def _ensure_unique_slug(db: AsyncSession, base_slug: str) -> str:
 async def upload_post_md(
     db: DBSession,
     _: AdminId,
-    file: UploadFile = File(...),
-    channel_id: UUID = Form(...),
+    files: list[UploadFile] = File(..., description="多文件(.md/.markdown)"),
+    channel_id: UUID = Form(..., description="归属频道 ID"),
 ) -> dict:
-    """上传 Markdown 文件 → 解析 → 创建草稿 → 返回 ArticleAdmin。
+    """批量上传 Markdown 文件 → 解析 → 创建草稿 → 返回 {created, failed}。
 
-    流程:
+    流程（逐文件）:
     1. 安全验证(扩展名/MIME/大小/NUL/UTF-8)
     2. 提取 title 与 slug(首 # 标题优先,文件名兜底)
     3. slug 冲突时自动加 -2/-3 后缀
     4. 解析 headings 生成 toc
     5. 创建 status=draft 文章(不触发 RAG 入库)
-    6. 返回 ArticleAdmin,前端跳 /admin/posts/{id}/edit
+
+    多文件时逐文件处理，单个文件失败（校验/解析）不阻断其他文件，
+    失败项进 failed 列表（含 filename + reason），成功项进 created 列表。
 
     RAG 入库在文章发布时由 update_status 触发,本接口不调用。
     """
-    # 1. 安全验证
-    try:
-        content_md = validate_markdown_file(file)
-    except UploadSecurityError as e:
-        raise AppError(str(e), status_code=400, code=4000) from e
+    if not files:
+        raise AppError("未提供文件", status_code=400, code=4000)
 
-    # 2. 提取 title 与 slug
-    title, base_slug = _extract_title_and_slug(
-        content_md, file.filename or "untitled.md"
-    )
+    # 循环内只收集 post_id，commit 后统一 get_with_channel 预加载关系再序列化
+    # （异步 session 不支持 lazy load，_to_admin 访问 p.channel 会抛 MissingGreenlet）
+    created_ids: list[UUID] = []
+    failed: list[dict] = []
 
-    # 3. slug 唯一化
-    slug = await _ensure_unique_slug(db, base_slug)
+    for file in files:
+        filename = file.filename or "untitled.md"
 
-    # 4. 生成 toc
-    parsed = parse_markdown(title=title, content_md=content_md, slug=slug)
-    toc = headings_to_toc(parsed.headings)
+        # 1. 安全验证
+        try:
+            content_md = validate_markdown_file(file)
+        except UploadSecurityError as e:
+            failed.append({"filename": filename, "reason": str(e)})
+            continue
 
-    # 5. 创建草稿
-    payload = PostCreate(
-        slug=slug,
-        title=title,
-        content_md=content_md,
-        channel_id=channel_id,
-        status="draft",
-        toc=toc,
-    )
-    # 自动填充 excerpt / reading_time(toc 已显式提供,不会覆盖)
-    _apply_derived_fields(payload)
-    p = await post_crud.create(db, payload)
+        # 2. 提取 title 与 slug
+        try:
+            title, base_slug = _extract_title_and_slug(content_md, filename)
+            # 3. slug 唯一化
+            slug = await _ensure_unique_slug(db, base_slug)
+            # 4. 生成 toc
+            parsed = parse_markdown(title=title, content_md=content_md, slug=slug)
+            toc = headings_to_toc(parsed.headings)
+
+            # 5. 创建草稿
+            payload = PostCreate(
+                slug=slug,
+                title=title,
+                content_md=content_md,
+                channel_id=channel_id,
+                status="draft",
+                toc=toc,
+            )
+            # 自动填充 excerpt / reading_time(toc 已显式提供,不会覆盖)
+            _apply_derived_fields(payload)
+            p = await post_crud.create(db, payload)
+            created_ids.append(p.id)
+        except Exception as e:
+            logger.warning(
+                "post_upload_failed", filename=filename, error=str(e)
+            )
+            failed.append({"filename": filename, "reason": f"解析/创建失败: {e}"})
+            continue
+
+    # 统一提交：所有成功的草稿一并持久化
     await db.commit()
-    p = await post_crud.get_with_channel(db, p.id)
+
+    # commit 后统一重新加载（含 channel 关系）用于响应
+    reloaded: list[dict] = []
+    for post_id in created_ids:
+        p = await post_crud.get_with_channel(db, post_id)
+        if p:
+            reloaded.append(_to_admin(p).model_dump())
+        else:
+            logger.warning("post_missing_after_commit", post_id=str(post_id))
+            reloaded.append({"id": str(post_id), "status": "missing"})
+
     logger.info(
-        "post_uploaded", post_id=str(p.id), slug=p.slug, filename=file.filename
+        "posts_batch_uploaded",
+        channel_id=str(channel_id),
+        created=len(reloaded),
+        failed=len(failed),
     )
-    return envelope(_to_admin(p).model_dump())
+    return envelope({"created": reloaded, "failed": failed})

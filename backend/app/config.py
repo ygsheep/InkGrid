@@ -68,6 +68,10 @@ class Settings(BaseSettings):
     llm_temperature: float = 0.3
     llm_max_tokens: int = 2048
     llm_request_timeout: float = 60.0  # 流式首 token 超时阈值
+    # 思考模式：auto（按模型名自动推断）/ on（强制按思考模型处理）/ off（强制按非思考模型处理）
+    # 思考模型（glm-4.6v/deepseek-r1/qwq 等）会先输出 reasoning_content 再输出 content，
+    # 需要更大的 max_tokens，否则思考过程占满 token 导致正式回答为空。
+    llm_enable_reasoning: str = "auto"
 
     # ===== Embedding（BGE-M3） =====
     # 双模式：配了 embedding_tei_url 用 TEI 服务，否则进程内 sentence-transformers 加载
@@ -84,6 +88,10 @@ class Settings(BaseSettings):
     reranker_cache_dir: str = "./models"
     reranker_top_n: int = 5  # 精排后保留数量
     reranker_tei_url: str = ""  # TEI 服务地址，如 http://localhost:8081；空则进程内
+    # 澄清阈值：rerank top 分数低于此值时触发澄清引导（不调 LLM，直接让用户换问法）。
+    # bge-reranker-v2-m3 对中文查询打分偏低，0.3 过严会误杀正常查询，默认 0.1。
+    # 调高→更保守（更多查询被判为"不相关"）；调低→更宽松（几乎都走 LLM）。
+    rag_clarify_threshold: float = 0.1
 
     # ===== Milvus 向量库 =====
     milvus_host: str = "localhost"

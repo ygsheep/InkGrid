@@ -31,7 +31,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     const channels = await fetchChannels();
     for (const c of channels) {
       channelRoutes.push({
-        url: `${BASE}/channel/${c.slug}`,
+        url: `${BASE}/channel?channel=${c.slug}`,
         lastModified: now,
         changeFrequency: 'weekly',
         priority: 0.7,

@@ -23,10 +23,14 @@ async def _collect_frames(gen) -> list[dict]:
 
 
 def _async_gen(tokens: list[str]):
-    """构造一个 async generator，逐个 yield token。"""
+    """构造一个 async generator，逐个 yield (kind, delta) 元组。
+
+    适配 RAGAgent.stream_answer 的新签名：返回 (kind, delta)，
+    kind 为 "reasoning" 或 "content"。测试场景默认全部为 content。
+    """
     async def _gen():
         for t in tokens:
-            yield t
+            yield "content", t
     return _gen()
 
 
@@ -120,11 +124,22 @@ async def test_pipeline_no_citation_when_no_marker():
 
 @pytest.mark.asyncio
 async def test_pipeline_no_results_fallback():
-    """检索无结果 → no_result token + followup + done。"""
-    with patch(
-        "app.services.rag.pipeline.retriever.retrieve",
-        new_callable=AsyncMock,
-        return_value=[],
+    """检索无结果 → LLM 兜底回答 + followup + done。
+
+    设计原则：无结果时走 LLM 兜底（"LLM 兜底比固定文案体验更好"），
+    不再返回固定文案。本测试 mock agent 输出"没有检索到..."以验证
+    兜底分支走通且不发 citation。
+    """
+    with (
+        patch(
+            "app.services.rag.pipeline.retriever.retrieve",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        patch(
+            "app.services.rag.pipeline.rag_agent.stream_answer",
+            return_value=_async_gen(["没有检索到相关资料，无法回答。"]),
+        ),
     ):
         frames = await _collect_frames(
             run_rag_pipeline("无关问题", scope_type="global")
@@ -135,7 +150,7 @@ async def test_pipeline_no_results_fallback():
     assert "没有检索到" in frames[0]["content"] or "没有找到" in frames[0]["content"]
     assert ws_constants.FOLLOWUP in types
     assert types[-1] == ws_constants.DONE
-    # 不应有 citation
+    # 不应有 citation（无 ranked chunks）
     assert ws_constants.CITATION not in types
 
 
@@ -236,11 +251,17 @@ async def test_pipeline_error_on_agent_failure():
 
 @pytest.mark.asyncio
 async def test_pipeline_simple_no_results():
-    """非流式版无结果返回兜底。"""
-    with patch(
-        "app.services.rag.pipeline.retriever.retrieve",
-        new_callable=AsyncMock,
-        return_value=[],
+    """非流式版无结果 → LLM 兜底回答。"""
+    with (
+        patch(
+            "app.services.rag.pipeline.retriever.retrieve",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        patch(
+            "app.services.rag.pipeline.rag_agent.stream_answer",
+            return_value=_async_gen(["没有检索到相关资料。"]),
+        ),
     ):
         answer, citations, followups = await run_rag_pipeline_simple(
             "问题", scope_type="global"

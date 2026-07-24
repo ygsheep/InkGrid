@@ -10,6 +10,7 @@
 :root {
   /* Surface tier (Luminance Tiering) */
   --color-base: #000000; /* Level 0 — pure black */
+  --color-black: #000000; /* pure black, 语义别名,用于高亮文本等场景 */
   --color-surface: #0a0a0a; /* Level 1 — panels */
   --color-surface-2: #121212; /* Level 2 — popovers/modals */
   --color-elevated: #1a1a1a;
@@ -147,6 +148,14 @@ body {
 ::selection {
   background: rgba(255, 255, 255, 0.18);
   color: var(--color-primary);
+}
+
+/* 用户消息气泡（中深灰 bg-secondary-container）选中文字时，
+   用 tertiary 绿色作为高亮背景 + 深色文字，在深色气泡上对比鲜明。
+   .msg-user-bubble 类标记用户气泡，覆盖全局 ::selection。 */
+.msg-user-bubble ::selection {
+  background: var(--color-tertiary-fixed);
+  color: var(--color-on-tertiary-fixed);
 }
 
 /* ==========================================================================
@@ -552,7 +561,7 @@ body {
 
 /* Meilisearch 搜索结果高亮（<mark> 标签由后端 _formatted 返回） */
 mark {
-  background: var(--color-primary);
+  background: var(--color-tertiary-fixed);
   color: var(--color-black);
   padding: 0 2px;
   border-radius: 1px;

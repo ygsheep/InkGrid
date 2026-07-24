@@ -13,6 +13,7 @@ HEARTBEAT = "heartbeat"
 
 # S → C
 TOKEN = "token"
+REASONING = "reasoning"  # reasoning 模型的思考过程（流式增量）
 CITATION = "citation"
 FOLLOWUP = "followup"
 CLARIFY = "clarify"

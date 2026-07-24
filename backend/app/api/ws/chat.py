@@ -211,16 +211,25 @@ async def chat_endpoint(
             )
 
             # 持久化 assistant 消息（含 citations/followups）
-            async with async_session_factory() as db:
-                await chat_message.add(
-                    db,
-                    session_id=session_id,
-                    role="assistant",
-                    content=answer,
-                    citations=citations or None,
-                    follow_ups=followups or None,
+            # answer 为空说明 pipeline 异常或 LLM 未返回内容，
+            # error 帧已通过 websocket 发给前端，这里不存空消息避免污染历史
+            if answer:
+                async with async_session_factory() as db:
+                    await chat_message.add(
+                        db,
+                        session_id=session_id,
+                        role="assistant",
+                        content=answer,
+                        citations=citations or None,
+                        follow_ups=followups or None,
+                    )
+                    await db.commit()
+            else:
+                logger.warning(
+                    "empty_answer_skipped",
+                    session_id=str(session_id),
+                    query=content[:50],
                 )
-                await db.commit()
 
     except WebSocketDisconnect:
         logger.info("ws_disconnected", session_id=str(session_id))

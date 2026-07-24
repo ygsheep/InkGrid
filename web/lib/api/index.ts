@@ -6,7 +6,7 @@
  *  - dev:  NEXT_PUBLIC_API_BASE=http://localhost:8000/api
  *  - prod: NEXT_PUBLIC_API_BASE=/api
  */
-import type { Article, ArticleSummary, Channel, Persona } from '@/types';
+import type { Article, ArticleSummary, Channel, Citation, Persona } from '@/types';
 import { request, serverFetch } from './request';
 
 // ===== 类型 =====
@@ -149,6 +149,36 @@ export interface SearchSuggestion {
   views: number;
 }
 
+// ===== Chat Session（公开问答会话）=====
+
+export interface ChatSessionCreatePayload {
+  persona_id?: string | null;
+  scope_type?: 'global' | 'channel' | 'article';
+  scope_ref?: string | null;
+  title?: string | null;
+}
+
+export interface ChatSessionOut {
+  id: string;
+  anon_id: string | null;
+  persona_id: string | null;
+  scope_type: string;
+  scope_ref: string | null;
+  title: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChatMessageOut {
+  id: string;
+  session_id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  citations?: Citation[] | null;
+  follow_ups?: string[] | null;
+  created_at: string;
+}
+
 // ===== Client-side（'use client' 组件用）=====
 // 注意：response interceptor 已 unwrap envelope，request.get 返回的是 data 本身。
 // 这里用 as 断言修正类型。
@@ -193,6 +223,20 @@ export const api = {
   async searchSuggestions(limit = 5) {
     return unwrap<{ suggestions: SearchSuggestion[] }>(
       request.get(`/search/suggestions?limit=${limit}`),
+    );
+  },
+  // ===== Chat Session =====
+  async createChatSession(payload: ChatSessionCreatePayload = {}) {
+    return unwrap<ChatSessionOut>(request.post('/chat/sessions', payload));
+  },
+  async listChatSessions(page = 1, size = 20) {
+    return unwrap<Paginated<ChatSessionOut>>(
+      request.get(`/chat/sessions?page=${page}&size=${size}`),
+    );
+  },
+  async listChatMessages(sessionId: string, limit = 100) {
+    return unwrap<Paginated<ChatMessageOut>>(
+      request.get(`/chat/sessions/${sessionId}/messages?limit=${limit}`),
     );
   },
 };

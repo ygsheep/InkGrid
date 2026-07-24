@@ -71,7 +71,7 @@ export default function ArticleShell({ slug, article, relatedPosts = [], adjacen
         {/* 顶部 meta 行：返回链接 + 侧栏切换按钮 */}
         <div className="flex justify-between items-center gap-4">
           <Link
-            href={`/channel/${a.channel}`}
+            href={`/channel?channel=${a.channel}`}
             className="font-mono text-label-mono text-on-surface-variant hover:text-primary uppercase tracking-widest flex items-center gap-2"
           >
             <ArrowLeft size={12} />

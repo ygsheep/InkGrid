@@ -1,8 +1,10 @@
-"""MinIO 对象存储:图片上传与访问。
+"""MinIO 对象存储:图片上传与访问 + 知识库源文件归档/下载。
 
 bucket 在 docker-compose.dev.yml 的 minio-init 中自动创建并设为公开读。
 上传的图片通过 {public_base}/{bucket}/{object_name} 直接访问。
+知识库源文件（PDF/DOCX/TXT/MD）归档到 docs/ 前缀，不公开，通过后台下载接口取回。
 """
+import os
 import uuid
 from datetime import datetime
 from io import BytesIO
@@ -96,8 +98,6 @@ def upload_image(
     # 生成 object 名:images/{年月}/{uuid}{ext}
     ext = EXT_BY_TYPE.get(content_type, "")
     if not ext and filename:
-        import os
-
         ext = os.path.splitext(filename)[1] or ""
     now = datetime.utcnow()
     object_name = f"images/{now.strftime('%Y%m')}/{uuid.uuid4().hex}{ext}"
@@ -118,3 +118,75 @@ def upload_image(
     # prod: 由 Nginx/CDN 代理,endpoint 通常是内部地址
     scheme = "https" if settings.minio_secure else "http"
     return f"{scheme}://{settings.minio_endpoint}/{settings.minio_bucket}/{object_name}"
+
+
+# ===== 知识库源文件归档（不公开，通过后台下载接口取回） =====
+
+
+def upload_document(
+    content: bytes,
+    content_type: str,
+    filename: str | None = None,
+) -> str:
+    """归档知识库上传的源文件到 MinIO，返回对象键（raw_uri）。
+
+    与 upload_image 区别：
+    - 归档到 docs/ 前缀，不对外公开（仅后台下载接口可读）
+    - 不校验 MIME 白名单（已由 upload_security 按扩展名校验）
+    - 不返回公开 URL，返回 object_name 供后续下载/重解析
+
+    Args:
+        content: 文件二进制
+        content_type: 浏览器上报的 MIME（透传，下载时还原 Content-Type）
+        filename: 原始文件名（仅用于扩展名推断）
+
+    Returns:
+        object_name，如 docs/202607/abc123.pdf
+    """
+    ext = ""
+    if filename:
+        ext = os.path.splitext(filename)[1] or ""
+    now = datetime.utcnow()
+    object_name = f"docs/{now.strftime('%Y%m')}/{uuid.uuid4().hex}{ext}"
+
+    client = _get_client()
+    _ensure_bucket(client)
+
+    client.put_object(
+        bucket_name=settings.minio_bucket,
+        object_name=object_name,
+        data=BytesIO(content),
+        length=len(content),
+        content_type=content_type or "application/octet-stream",
+    )
+    return object_name
+
+
+def get_object(object_name: str):
+    """从 MinIO 拉取对象，返回 urllib3 Response（可流式读取）。
+
+    供下载接口 StreamingResponse 使用：
+        resp = get_object(raw_uri)
+        return StreamingResponse(resp.stream(...), media_type=resp.headers.get("Content-Type"))
+
+    Raises:
+        S3Error: 对象不存在或 MinIO 不可达
+    """
+    client = _get_client()
+    return client.get_object(settings.minio_bucket, object_name)
+
+
+def delete_object(object_name: str) -> None:
+    """删除 MinIO 对象（知识库文档删除时清理源文件归档）。
+
+    对象不存在（NoSuchKey）视为成功（幂等）；其他 S3 错误向上抛出，
+    由调用方决定是否阻断主流程（文档删除时建议 catch 后仅记日志）。
+    """
+    client = _get_client()
+    try:
+        client.remove_object(settings.minio_bucket, object_name)
+    except S3Error as e:
+        # 对象不存在视为成功（幂等）
+        if e.code != "NoSuchKey":
+            raise
+

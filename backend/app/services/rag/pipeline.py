@@ -48,42 +48,44 @@ async def run_rag_pipeline(
             scope_ref=scope_ref,
         )
 
-        # 2. 无结果兜底
+        # 2. 无结果 → 跳过精排，用空 context 走 LLM（LLM 兜底比固定文案体验更好）
         if not chunks:
             logger.info("no_results", query=query[:50], scope=f"{scope_type}:{scope_ref}")
-            yield {"type": ws_constants.TOKEN, "content": build_no_result_reply()}
-            yield {
-                "type": ws_constants.FOLLOWUP,
-                "questions": build_followups(query, ""),
-            }
-            yield {"type": ws_constants.DONE}
-            return
-
-        # 3. 精排
-        ranked = await reranker.rerank(
-            query=query,
-            chunks=chunks,
-            top_n=settings.reranker_top_n,
-        )
-
-        # 4. 阈值判定 → 澄清
-        top_score = ranked[0].get("score", 0.0) if ranked else 0.0
-        if should_clarify(top_score):
-            logger.info(
-                "clarify_triggered",
-                query=query[:50],
-                top_score=top_score,
+            context = "（无参考资料，请基于自身知识回答）"
+            ranked = []
+        else:
+            # 3. 精排
+            ranked = await reranker.rerank(
+                query=query,
+                chunks=chunks,
+                top_n=settings.reranker_top_n,
             )
-            yield build_clarify_frame(query)
-            yield {"type": ws_constants.DONE}
-            return
 
-        # 5. 组装上下文
-        context = build_context(ranked)
+            # 4. 阈值判定 → 澄清
+            top_score = ranked[0].get("score", 0.0) if ranked else 0.0
+            if should_clarify(top_score):
+                logger.info(
+                    "clarify_triggered",
+                    query=query[:50],
+                    top_score=top_score,
+                    threshold=get_settings().rag_clarify_threshold,
+                )
+                # 发 clarify 帧让前端展示选项卡片
+                yield build_clarify_frame(query)
+                # 同时把引导文案作为 token 帧发出，让前端消息流有内容、chat.py 能持久化
+                clarify_text = build_clarify_frame(query)["content"]
+                yield {"type": ws_constants.TOKEN, "content": clarify_text}
+                yield {"type": ws_constants.DONE}
+                return
+
+            # 5. 组装上下文
+            context = build_context(ranked)
 
         # 6. LLM 流式生成（标注 [n]）
+        # reasoning 模型会先输出思考过程（reasoning 帧），再输出正式回答（token 帧）
         answer_parts: list[str] = []
-        async for token in rag_agent.stream_answer(
+        reasoning_parts: list[str] = []  # 收集思考过程，用于 content 为空时的诊断
+        async for kind, delta in rag_agent.stream_answer(
             query=query,
             context=context,
             persona_name=persona_name,
@@ -91,10 +93,31 @@ async def run_rag_pipeline(
             scope_type=scope_type,
             scope_ref=scope_ref,
         ):
-            yield {"type": ws_constants.TOKEN, "content": token}
-            answer_parts.append(token)
+            if kind == "reasoning":
+                reasoning_parts.append(delta)
+                yield {"type": ws_constants.REASONING, "content": delta}
+            else:
+                yield {"type": ws_constants.TOKEN, "content": delta}
+                answer_parts.append(delta)
 
         answer = "".join(answer_parts)
+
+        # 诊断：思考模型只输出了 reasoning 没有 content（思考占满 max_tokens）
+        if not answer and reasoning_parts:
+            reasoning_len = sum(len(p) for p in reasoning_parts)
+            logger.error(
+                "reasoning_exhausted_tokens",
+                query=query[:50],
+                reasoning_chars=reasoning_len,
+                hint="思考过程占满 max_tokens 导致正式回答为空，请增大 llm_max_tokens 或缩短上下文",
+            )
+            yield {
+                "type": ws_constants.ERROR,
+                "code": ws_constants.ERR_INTERNAL,
+                "message": "模型思考过程过长，未能生成正式回答。请在设置中增大 max_tokens 或换用非思考模型。",
+            }
+            yield {"type": ws_constants.DONE}
+            return
 
         # 7. 引用对齐
         citations = align_citations(answer, ranked)
@@ -119,7 +142,13 @@ async def run_rag_pipeline(
         )
 
     except Exception as e:
-        logger.exception("pipeline_error", query=query[:50], error=str(e))
+        logger.exception(
+            "pipeline_error",
+            query=query[:50],
+            scope=f"{scope_type}:{scope_ref}",
+            error=str(e),
+            error_type=type(e).__name__,
+        )
         yield {
             "type": ws_constants.ERROR,
             "code": ws_constants.ERR_INTERNAL,
@@ -151,13 +180,15 @@ async def run_rag_pipeline_simple(
     context = build_context(ranked)
 
     answer_parts: list[str] = []
-    async for token in rag_agent.stream_answer(
+    async for kind, delta in rag_agent.stream_answer(
         query=query,
         context=context,
         scope_type=scope_type,
         scope_ref=scope_ref,
     ):
-        answer_parts.append(token)
+        # 非流式版只收集正式回答，丢弃 reasoning（语音场景无需思考过程）
+        if kind == "content":
+            answer_parts.append(delta)
     answer = "".join(answer_parts)
 
     citations = align_citations(answer, ranked)

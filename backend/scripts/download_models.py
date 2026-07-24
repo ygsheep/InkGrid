@@ -28,6 +28,7 @@ MODELS = {
 # 必要文件：权重 + tokenizer + config（跳过 README/图片/onnx 等冗余）
 ALLOW_PATTERNS = [
     "*.safetensors",
+    "*.bin",
     "config.json",
     "config_sentence_transformers.json",
     "sentence_bert_config.json",
@@ -37,6 +38,15 @@ ALLOW_PATTERNS = [
     "tokenizer.json",
     "tokenizer_config.json",
     "1_Pooling/*",
+]
+
+#: TEI / FlagEmbedding 启动必需的配置文件（_check_model 逐一校验）
+REQUIRED_CONFIG_FILES = [
+    "config.json",
+    "tokenizer.json",
+    "tokenizer_config.json",
+    "sentencepiece.bpe.model",
+    "special_tokens_map.json",
 ]
 
 # ONNX 文件（可选，仅 process 内 ONNX Runtime 推理时需要）
@@ -49,16 +59,20 @@ def _set_env() -> None:
 
 
 def _check_model(path: Path) -> tuple[bool, str]:
-    """检查模型目录是否已下载完整（含 safetensors 权重）。"""
+    """检查模型目录是否已下载完整（权重 + TEI 必需配置文件）。"""
     if not path.exists():
         return False, "目录不存在"
     safetensors = list(path.rglob("*.safetensors"))
-    if not safetensors:
-        return False, "缺少 safetensors 权重文件"
-    tokenizer = path / "tokenizer.json"
-    if not tokenizer.exists():
-        return False, "缺少 tokenizer.json"
-    return True, f"OK ({len(safetensors)} 个权重文件)"
+    bins = list(path.rglob("*.bin"))
+    onnx = list(path.rglob("*.onnx_data"))
+    weights = safetensors or bins or onnx
+    if not weights:
+        return False, "缺少权重文件（safetensors/bin/onnx）"
+    # 逐一校验 TEI / FlagEmbedding 启动必需的配置文件
+    missing = [f for f in REQUIRED_CONFIG_FILES if not (path / f).exists()]
+    if missing:
+        return False, f"缺少配置文件: {', '.join(missing)}"
+    return True, f"OK ({len(weights)} 个权重文件, 配置完整)"
 
 
 def _dir_size(path: Path) -> str:

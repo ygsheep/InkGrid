@@ -5,9 +5,10 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { App, Button, Input, Modal, Select, Space, Table, Tag, Tooltip, Upload } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import type { UploadFile } from 'antd/es/upload/interface';
 import { Edit3, Plus, Trash2, Send, Archive, FileEdit, Upload as UploadIcon } from 'lucide-react';
 import { useAdminChannels, useAdminPosts, useDeletePost, useSetPostStatus, useUploadPostMd } from '@/hooks/useAdmin';
-import type { AdminPost } from '@/lib/api/admin';
+import type { AdminPost, PostUploadResult } from '@/lib/api/admin';
 import { formatDate } from '@/lib/utils';
 
 const STATUS_OPTIONS = [
@@ -40,10 +41,11 @@ export default function AdminPostsPage() {
   const [page, setPage] = useState(1);
   const [size, setSize] = useState(20);
 
-  // 上传 MD 文件
+  // 上传 MD 文件（多文件批量）
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploadChannelId, setUploadChannelId] = useState<string>('');
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadFiles, setUploadFiles] = useState<File[]>([]);
+  const [uploadResult, setUploadResult] = useState<PostUploadResult | null>(null);
 
   // 拉频道列表作为筛选项
   const { data: channelsData } = useAdminChannels({ size: 200 });
@@ -68,12 +70,17 @@ export default function AdminPostsPage() {
   });
 
   const uploadPostMd = useUploadPostMd({
-    onSuccess: (data) => {
-      message.success('已导入,跳转编辑页');
-      setUploadOpen(false);
-      setUploadFile(null);
-      setUploadChannelId('');
-      router.push(`/admin/posts/${data.id}/edit`);
+    onSuccess: (result) => {
+      setUploadResult(result);
+      const okCount = result.created.length;
+      const failCount = result.failed.length;
+      if (failCount === 0) {
+        message.success(`全部导入成功：${okCount} 篇草稿已创建`);
+      } else if (okCount === 0) {
+        message.error(`全部导入失败：${failCount} 个文件`);
+      } else {
+        message.warning(`部分成功：${okCount} 篇草稿，${failCount} 个失败`);
+      }
     },
     onError: (e) => message.error(e.message),
   });
@@ -243,7 +250,7 @@ export default function AdminPostsPage() {
         </div>
         <Space>
           <Button icon={<UploadIcon size={14} />} onClick={() => setUploadOpen(true)}>
-            上传 MD
+            批量上传 MD
           </Button>
           <Link href="/admin/posts/new">
             <Button type="primary" icon={<Plus size={14} />}>
@@ -314,78 +321,200 @@ export default function AdminPostsPage() {
         scroll={{ x: 980 }}
       />
 
-      {/* 上传 MD Modal */}
+      {/* 上传 MD Modal：多文件批量上传 + 结果展示 */}
       <Modal
         title="上传 Markdown 文件"
         open={uploadOpen}
         onCancel={() => {
           setUploadOpen(false);
-          setUploadFile(null);
+          setUploadFiles([]);
           setUploadChannelId('');
+          setUploadResult(null);
         }}
-        onOk={() => {
-          if (!uploadFile) {
-            message.warning('请选择 .md 文件');
-            return;
-          }
-          if (!uploadChannelId) {
-            message.warning('请选择频道');
-            return;
-          }
-          uploadPostMd.mutate({ file: uploadFile, channelId: uploadChannelId });
-        }}
-        okText="解析并创建草稿"
-        cancelText="取消"
-        confirmLoading={uploadPostMd.isPending}
-        okButtonProps={{ disabled: !uploadFile || !uploadChannelId }}
+        width={640}
+        footer={
+          uploadResult ? (
+            <Space>
+              <Button
+                onClick={() => {
+                  // 继续上传：清空结果，回到表单
+                  setUploadResult(null);
+                  setUploadFiles([]);
+                }}
+              >
+                继续上传
+              </Button>
+              <Button
+                type="primary"
+                onClick={() => {
+                  setUploadOpen(false);
+                  setUploadFiles([]);
+                  setUploadChannelId('');
+                  setUploadResult(null);
+                  // 跳转到第一篇草稿的编辑页（若有）
+                  const first = uploadResult.created[0];
+                  if (first) {
+                    router.push(`/admin/posts/${first.id}/edit`);
+                  }
+                }}
+              >
+                {uploadResult.created.length > 0
+                  ? `编辑第一篇（${uploadResult.created.length} 篇草稿）`
+                  : '完成'}
+              </Button>
+            </Space>
+          ) : (
+            <Space>
+              <Button
+                onClick={() => {
+                  setUploadOpen(false);
+                  setUploadFiles([]);
+                  setUploadChannelId('');
+                }}
+              >
+                取消
+              </Button>
+              <Button
+                type="primary"
+                onClick={() => {
+                  if (uploadFiles.length === 0) {
+                    message.warning('请选择 .md 文件');
+                    return;
+                  }
+                  if (!uploadChannelId) {
+                    message.warning('请选择频道');
+                    return;
+                  }
+                  uploadPostMd.mutate({
+                    files: uploadFiles,
+                    channelId: uploadChannelId,
+                  });
+                }}
+                loading={uploadPostMd.isPending}
+                disabled={uploadFiles.length === 0 || !uploadChannelId}
+              >
+                {`解析并创建草稿${uploadFiles.length > 0 ? `（${uploadFiles.length} 个文件）` : ''}`}
+              </Button>
+            </Space>
+          )
+        }
       >
-        <div className="space-y-4 py-2">
-          <div>
-            <div className="font-mono text-label-mono text-on-surface-variant uppercase tracking-widest mb-2">
-              频道
-            </div>
-            <Select
-              value={uploadChannelId || undefined}
-              onChange={setUploadChannelId}
-              placeholder="选择频道"
-              style={{ width: '100%' }}
-              options={(channelsData?.items || []).map((c) => ({
-                label: c.name,
-                value: c.id,
-              }))}
-            />
+        {uploadResult ? (
+          /* 上传结果展示：created + failed */
+          <div className="space-y-4 py-2">
+            {uploadResult.created.length > 0 && (
+              <div>
+                <div className="font-mono text-label-mono text-on-surface-variant uppercase tracking-widest mb-2">
+                  {`成功创建草稿（${uploadResult.created.length}）`}
+                </div>
+                <div className="space-y-1 max-h-48 overflow-auto">
+                  {uploadResult.created.map((p) => (
+                    <Link
+                      key={p.id}
+                      href={`/admin/posts/${p.id}/edit`}
+                      className="flex items-center justify-between gap-2 px-3 py-1.5 bg-surface-container-lowest border border-outline-variant hover:border-primary transition-colors"
+                    >
+                      <span className="truncate text-on-surface text-sm">
+                        {p.title}
+                      </span>
+                      <span className="font-mono text-label-mono text-tertiary-fixed shrink-0">
+                        /{p.slug}
+                      </span>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
+            {uploadResult.failed.length > 0 && (
+              <div>
+                <div className="font-mono text-label-mono text-error uppercase tracking-widest mb-2">
+                  {`导入失败（${uploadResult.failed.length}）`}
+                </div>
+                <div className="space-y-1 max-h-48 overflow-auto">
+                  {uploadResult.failed.map((item, i) => (
+                    <div
+                      key={`${item.filename}-${i}`}
+                      className="px-3 py-1.5 bg-surface-container-lowest border border-outline-variant"
+                    >
+                      <div className="text-on-surface text-sm truncate">
+                        {item.filename}
+                      </div>
+                      <div className="font-mono text-label-mono text-error mt-0.5">
+                        {item.reason}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
-          <div>
-            <div className="font-mono text-label-mono text-on-surface-variant uppercase tracking-widest mb-2">
-              Markdown 文件
+        ) : (
+          /* 文件选择表单 */
+          <div className="space-y-4 py-2">
+            <div>
+              <div className="font-mono text-label-mono text-on-surface-variant uppercase tracking-widest mb-2">
+                频道
+              </div>
+              <Select
+                value={uploadChannelId || undefined}
+                onChange={setUploadChannelId}
+                placeholder="选择频道"
+                style={{ width: '100%' }}
+                options={(channelsData?.items || []).map((c) => ({
+                  label: c.name,
+                  value: c.id,
+                }))}
+              />
             </div>
-            <Upload
-              accept=".md,.markdown"
-              maxCount={1}
-              beforeUpload={(file) => {
-                setUploadFile(file);
-                return false; // 阻止自动上传,由 Modal onOk 触发
-              }}
-              onRemove={() => setUploadFile(null)}
-              fileList={
-                uploadFile
-                  ? [
-                      {
-                        uid: '-1',
-                        name: uploadFile.name,
-                        status: 'done',
-                      },
-                    ]
-                  : []
-              }
-            >
-              <Button icon={<UploadIcon size={14} />}>选择 .md 文件</Button>
-            </Upload>
-            <div className="font-mono text-label-mono text-tertiary-fixed mt-2">
-              仅支持 .md / .markdown,≤ 5MB,UTF-8 编码
+            <div>
+              <div className="font-mono text-label-mono text-on-surface-variant uppercase tracking-widest mb-2">
+                Markdown 文件
+              </div>
+              <Upload.Dragger
+                multiple
+                maxCount={20}
+                accept=".md,.markdown"
+                beforeUpload={(file) => {
+                  // 客户端预校验：扩展名 + 大小（5MB）
+                  const name = file.name.toLowerCase();
+                  const isMd = name.endsWith('.md') || name.endsWith('.markdown');
+                  if (!isMd) {
+                    message.error(`${file.name}: 仅支持 .md / .markdown`);
+                    return Upload.LIST_IGNORE;
+                  }
+                  if (file.size > 5 * 1024 * 1024) {
+                    message.error(
+                      `${file.name}: 文件过大（${(file.size / 1024 / 1024).toFixed(1)}MB > 5MB）`,
+                    );
+                    return Upload.LIST_IGNORE;
+                  }
+                  setUploadFiles((prev) => [...prev, file]);
+                  return false; // 阻止自动上传，由 Modal 按钮统一提交
+                }}
+                onRemove={(file: UploadFile) => {
+                  const key = `${file.name}-${file.size}`;
+                  setUploadFiles((prev) =>
+                    prev.filter((f) => `${f.name}-${f.size}` !== key),
+                  );
+                }}
+                fileList={uploadFiles.map((f) => ({
+                  uid: `${f.name}-${f.size}`,
+                  name: f.name,
+                  size: f.size,
+                  status: 'done' as const,
+                }))}
+              >
+                <p className="ant-upload-text">点击或拖拽文件到此区域上传</p>
+                <p className="ant-upload-hint font-mono text-label-mono text-tertiary-fixed">
+                  仅支持 .md / .markdown，单文件 ≤ 5MB，UTF-8 编码，最多 20 个
+                </p>
+              </Upload.Dragger>
+              <div className="font-mono text-label-mono text-tertiary-fixed mt-2">
+                上传后创建为草稿（不触发发布和 RAG 入库），可在编辑页修改后发布
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </Modal>
     </div>
   );

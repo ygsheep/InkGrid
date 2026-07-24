@@ -17,7 +17,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # 先装依赖（利用 layer 缓存）
 COPY pyproject.toml ./
-RUN pip install --upgrade pip && pip install .
+# 配置清华 pip 镜像加速 + 重试，应对网络不稳定
+RUN pip install --upgrade pip \
+    && pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple \
+    && pip config set global.timeout 120 \
+    && pip config set global.retries 5 \
+    && pip install .
 
 # 拷贝源码
 COPY . .
